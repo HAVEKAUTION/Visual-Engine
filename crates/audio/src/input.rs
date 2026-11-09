@@ -1,4 +1,7 @@
-//! Live input (microphone / line-in) via cpal.
+//! Live input (microphone / line-in, or the computer's own sound) via cpal.
+//!
+//! "Computer audio" entries record an *output* device in loopback: WASAPI
+//! loopback on Windows, a Core Audio tap on macOS 14.2+.
 //!
 //! The input callback mixes each frame to mono, converts it to 48 kHz with a
 //! pre-allocated [`StreamResampler`] and pushes it into the analysis feed. It
@@ -20,6 +23,8 @@ use crate::resample::StreamResampler;
 pub struct InputDevice {
     pub name: String,
     pub is_default: bool,
+    /// Records what this output device is playing (system audio).
+    pub loopback: bool,
     device: cpal::Device,
 }
 
@@ -28,6 +33,7 @@ impl std::fmt::Debug for InputDevice {
         f.debug_struct("InputDevice")
             .field("name", &self.name)
             .field("is_default", &self.is_default)
+            .field("loopback", &self.loopback)
             .finish()
     }
 }
@@ -38,23 +44,50 @@ fn device_name(d: &cpal::Device) -> String {
         .unwrap_or_else(|_| "unknown device".into())
 }
 
-/// All capture devices (mics, line-ins) on the default audio host.
+/// Name prefix of the loopback ("computer audio") entries.
+pub const LOOPBACK_PREFIX: &str = "Computer audio: ";
+
+/// All capture devices: first "computer audio" (loopback of every output
+/// device, the default output first), then mics and line-ins.
 pub fn list_input_devices() -> Vec<InputDevice> {
     let host = cpal::default_host();
+    let mut out = Vec::new();
+
+    if cfg!(any(target_os = "windows", target_os = "macos")) {
+        let default_out = host.default_output_device().and_then(|d| d.id().ok());
+        let mut loop_devs: Vec<InputDevice> = host
+            .output_devices()
+            .map(|it| {
+                it.map(|device| InputDevice {
+                    name: format!("{LOOPBACK_PREFIX}{}", device_name(&device)),
+                    is_default: default_out.is_some() && device.id().ok() == default_out,
+                    loopback: true,
+                    device,
+                })
+                .collect()
+            })
+            .unwrap_or_default();
+        loop_devs.sort_by_key(|d| !d.is_default);
+        // Only the mic is the "default" pick; keep the flag for sorting only.
+        for d in &mut loop_devs {
+            d.is_default = false;
+        }
+        out.extend(loop_devs);
+    }
+
     let default_id = host.default_input_device().and_then(|d| d.id().ok());
-    let Ok(devices) = host.input_devices() else {
-        return Vec::new();
-    };
-    devices
-        .map(|device| {
+    if let Ok(devices) = host.input_devices() {
+        out.extend(devices.map(|device| {
             let is_default = default_id.is_some() && device.id().ok() == default_id;
             InputDevice {
                 name: device_name(&device),
                 is_default,
+                loopback: false,
                 device,
             }
-        })
-        .collect()
+        }));
+    }
+    out
 }
 
 /// A running capture stream. Dropping it stops capture.
@@ -68,10 +101,13 @@ pub struct LiveInput {
 
 impl LiveInput {
     pub fn start(input: &InputDevice, producer: FeedProducer) -> Result<Self> {
-        let supported = input
-            .device
-            .default_input_config()
-            .with_context(|| format!("could not query '{}'", input.name))?;
+        // Loopback records in the output device's own format.
+        let supported = if input.loopback {
+            input.device.default_output_config()
+        } else {
+            input.device.default_input_config()
+        }
+        .with_context(|| format!("could not query '{}'", input.name))?;
         let config: StreamConfig = supported.config();
         let failed = Arc::new(AtomicBool::new(false));
 
@@ -140,10 +176,47 @@ where
             resampler.process(sum * inv_ch, |y| push_one(&mut producer, y));
         }
     };
-    let err_cb = move |_err: cpal::Error| {
-        failed.store(true, Relaxed);
+    let err_cb = move |err: cpal::Error| {
+        // Dropouts and re-routes are harmless (loopback reports a dropout when
+        // it starts); anything else means the device is gone.
+        use cpal::ErrorKind::*;
+        if !matches!(err.kind(), Xrun | DeviceChanged | RealtimeDenied) {
+            failed.store(true, Relaxed);
+        }
     };
     device
         .build_input_stream::<T, _, _>(*config, data_cb, err_cb, None)
         .context("could not open the input stream")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Opens "computer audio" on the default output and checks that sound
+    /// arrives. Needs real hardware and something playing, so it only runs
+    /// when `VE_LOOPBACK_TEST=1`.
+    #[test]
+    fn loopback_captures_system_audio() {
+        if std::env::var("VE_LOOPBACK_TEST").is_err() {
+            return;
+        }
+        let dev = list_input_devices()
+            .into_iter()
+            .find(|d| d.loopback)
+            .expect("no computer-audio device");
+        let (tx, mut rx) = crate::feed::new_feed();
+        let live = LiveInput::start(&dev, tx).expect("loopback start");
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        let mut n = 0usize;
+        let mut peak = 0.0f32;
+        while let Ok(x) = rx.pop() {
+            n += 1;
+            peak = peak.max(x.abs());
+        }
+        println!("{}: {n} samples, peak {peak}", live.device_name);
+        assert!(!live.has_failed());
+        assert!(n > 48_000, "too few samples: {n}");
+        assert!(peak > 0.001, "silent");
+    }
 }

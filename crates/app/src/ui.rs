@@ -313,6 +313,25 @@ impl VisualEngineApp {
                     self.error = Some(format!("Could not start {}: {e:#}", device.name));
                 }
             }
+            let computer = self.input_devices.iter().position(|d| d.loopback);
+            if ui
+                .add_enabled(computer.is_some(), egui::Button::new("🔊 Computer audio"))
+                .on_hover_text(
+                    "Listen to whatever this computer is playing (Spotify, YouTube, a DJ app…)",
+                )
+                .clicked()
+                && let Some(i) = computer
+            {
+                self.selected_input = Some(i);
+                let device = self.input_devices[i].clone();
+                self.error = None;
+                if let Err(e) = self.engine.start_live(&device) {
+                    log::error!("could not start {}: {e:#}", device.name);
+                    self.error = Some(format!(
+                        "Could not capture computer audio: {e:#}. On a Mac this needs macOS 14.2 or newer and the \"System Audio Recording\" permission."
+                    ));
+                }
+            }
             if ui
                 .add_enabled(live_active, egui::Button::new("⏹ Stop"))
                 .clicked()
