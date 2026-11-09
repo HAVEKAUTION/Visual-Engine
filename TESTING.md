@@ -299,3 +299,19 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
 - [ ] Hi-hats: tiles on the ball sparkle white.
 - [ ] Every 4 bars the light colours rotate (*Colour rotation* at 0 stops that).
 - [ ] Try the presets *Golden Era* and *Afterhours*.
+
+## Computer audio (system loopback)
+
+- [ ] Play music in any app (Spotify, YouTube in the browser…). In Visual Engine click
+      **🔊 Computer audio** under LIVE INPUT. Within a second the scene reacts to it and
+      the meters (M) move. The device box shows "Computer audio: <your speakers>".
+- [ ] Pause the music: the visuals calm down. Play again: they come back.
+- [ ] Changing the volume barely matters (auto-gain), but muting the speakers may stop
+      the capture on some systems.
+- [ ] **⏹ Stop** stops listening.
+- [ ] Headphones / other outputs: pick "Computer audio: <that device>" in the list and
+      press **🎤 Start input**.
+- macOS only: the first time, macOS asks to allow **System Audio Recording** for the
+  app (or for Terminal, if started from Terminal). Click Allow. If you said no: System
+  Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
+  restart the app. Needs macOS 14.2 or newer.

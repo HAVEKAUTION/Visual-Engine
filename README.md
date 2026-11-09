@@ -16,6 +16,7 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **Genre scene pack**: nine scenes in total, each tagged with the music it suits.
 - **M3 – modulation, presets, hotkeys**: done. Link any slider to the music, colour
   palettes, presets on keys 1–9 with crossfades, blackout / flash / intensity keys.
+- **Computer audio**: visuals can follow whatever the computer plays (loopback).
 - **GATE** (a whole song looks great hands-off): next, then M4 (layers, MIDI).
 
 ## Running it

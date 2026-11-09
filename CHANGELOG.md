@@ -2,6 +2,14 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — Computer audio (system loopback)
+- New **🔊 Computer audio** button under LIVE INPUT: the visuals follow whatever the
+  computer is playing (Spotify, YouTube, a DJ app…), like OBS's desktop audio. Every
+  output device also appears as "Computer audio: …" in the device list.
+- Windows: WASAPI loopback, nothing to install. macOS: needs 14.2+ and the System Audio
+  Recording permission.
+- Harmless audio dropouts no longer stop a live input.
+
 ## 2026-11-09 — Rebuilt Iron Furnace (metal) and Velvet Mirrorball (house / disco)
 - Iron Furnace: a furnace seen through rings of spinning sawblades. Guitars feed the
   core and spin the blades, kicks punch and throw bursts of sparks, snares crack it with
