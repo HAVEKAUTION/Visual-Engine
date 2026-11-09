@@ -2,6 +2,7 @@
   "name": "Radial Spectrum",
   "author": "Visual Engine",
   "style": "minimal",
+  "genres": ["Any", "Pop", "Electronic"],
   "description": "A clean ring of spectrum bars (bass at the top, highs at the bottom, mirrored). The ring and the centre dot pulse on kicks and leave fading echoes.",
   "inputs": [
     { "name": "radius",     "label": "Ring radius",       "type": "float", "min": 0.1,  "max": 0.8,  "default": 0.34 },

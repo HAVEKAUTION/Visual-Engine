@@ -13,6 +13,7 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **GATE** (meters match kicks, snares and tempo on your own songs): passed.
 - **M2 – renderer and first scenes**: done. WGSL scenes with feedback, hot reload, three
   built-in scenes, scene picker, fullscreen, FPS counter. Writing scenes: `docs/SCENES.md`.
+- **Genre scene pack**: nine scenes in total, each tagged with the music it suits.
 - **M3** (modulation, presets, hotkeys): next.
 
 ## Running it

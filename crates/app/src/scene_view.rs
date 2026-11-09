@@ -272,39 +272,43 @@ impl SceneView {
         }
 
         // ---- picker ----
-        let names: Vec<(String, String, bool)> = self
+        // (file, name, genres, broken)
+        let names: Vec<(String, String, String, bool)> = self
             .library
             .entries()
             .iter()
             .map(|e| {
-                let name =
-                    scenes::SceneMeta::parse(&e.source, e.file_name.trim_end_matches(".wgsl"))
-                        .map(|m| m.name)
-                        .unwrap_or_else(|_| e.file_name.clone());
-                (
-                    e.file_name.clone(),
-                    name,
-                    self.errors.contains_key(&e.file_name),
-                )
+                let stem = e.file_name.trim_end_matches(".wgsl");
+                let (name, genres) = scenes::SceneMeta::parse(&e.source, stem)
+                    .map(|m| (m.name, m.genres.join(", ")))
+                    .unwrap_or_else(|_| (e.file_name.clone(), String::new()));
+                let broken = self.errors.contains_key(&e.file_name);
+                (e.file_name.clone(), name, genres, broken)
             })
             .collect();
         let current = names
             .iter()
-            .find(|(f, _, _)| *f == self.selected)
-            .map(|(_, n, _)| n.clone())
+            .find(|(f, ..)| *f == self.selected)
+            .map(|(_, n, ..)| n.clone())
             .unwrap_or_default();
         let mut pick = None;
         egui::ComboBox::from_id_salt("scene-picker")
             .width(ui.available_width())
+            .height(600.0)
             .selected_text(current)
             .show_ui(ui, |ui| {
-                for (file, name, broken) in &names {
-                    let label = if *broken {
+                for (file, name, genres, broken) in &names {
+                    let title = if *broken {
                         format!("⚠ {name}")
                     } else {
                         name.clone()
                     };
-                    if ui.selectable_label(*file == self.selected, label).clicked() {
+                    let resp =
+                        ui.selectable_label(*file == self.selected, RichText::new(title).strong());
+                    if !genres.is_empty() {
+                        ui.label(RichText::new(format!("    {genres}")).small().weak());
+                    }
+                    if resp.clicked() {
                         pick = Some(file.clone());
                     }
                 }
@@ -349,6 +353,13 @@ impl SceneView {
         }
         if let Some(style) = meta.style.as_str() {
             info += &format!(" · {style}");
+        }
+        if !meta.genres.is_empty() {
+            ui.label(
+                RichText::new(format!("Made for: {}", meta.genres.join(", ")))
+                    .small()
+                    .color(OK_COLOR),
+            );
         }
         if !info.is_empty() {
             ui.label(RichText::new(info).small().weak());

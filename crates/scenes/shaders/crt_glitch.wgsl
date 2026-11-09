@@ -2,6 +2,7 @@
   "name": "CRT Glitch",
   "author": "Visual Engine",
   "style": "retro / glitch",
+  "genres": ["Synthwave", "Electro", "Glitch Hop"],
   "description": "A neon synthwave horizon (grid floor, striped sun, spectrum skyline) shown on a worn CRT. Snares tear the picture into displaced blocks with RGB split; drops flash and smash it.",
   "inputs": [
     { "name": "drive_speed",  "label": "Grid speed",          "type": "float", "min": 0,   "max": 3,   "default": 0.6 },

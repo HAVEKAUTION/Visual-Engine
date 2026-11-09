@@ -2,6 +2,14 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — M2 extra: genre scene pack + gate test plan
+- Six new scenes, each made for a style of music: Canopy Breaks (jungle / drum & bass),
+  Warehouse Tunnel (techno), Iron Furnace (metal), Midnight Window (lo-fi),
+  Velvet Mirrorball (house / disco), Aurora Drift (ambient / acoustic).
+- Scene headers can list `"genres"`; the picker shows them under each scene name.
+  The original three are tagged too (psytrance, any/pop, synthwave).
+- TESTING.md: practical test plan for checking the analysis on your own songs.
+
 ## 2026-11-09 — M2: renderer and first scenes
 - wgpu renderer: full-screen WGSL scenes in the preview, one uniform block with every
   signal (+ time, resolution, built-in audio clocks), ping-pong feedback of the previous

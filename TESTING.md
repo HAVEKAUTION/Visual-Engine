@@ -189,3 +189,45 @@ is in the middle; the **SCENE** panel is on the right.
 - The picture renders at the preview size; fullscreen on a 4K screen renders 4K.
 - There is no separate output window yet (2nd screen comes in M5); fullscreen is the
   main window.
+
+## GATE – Analysis on your own songs
+
+Goal: check that the meters agree with what you hear before we build more on top.
+Turn the meters on (**M**). Pick the **Radial Spectrum** scene: it shows the analysis most
+directly (the dot = kicks).
+
+**Songs to try** (one or two of each; 1–2 minutes per song is enough)
+1. **Four-on-the-floor house / techno** (120–130 BPM): the easy case. Everything should
+   be right here.
+2. **Hip-hop / boom-bap** (85–95 BPM, swung drums).
+3. **Drum & bass / jungle** (170–175 BPM, busy breakbeats).
+4. **Slow acoustic or ballad** (soft, no drums or brushes only).
+5. **A track with a big build-up and drop** (EDM, dubstep, big-room).
+6. **Rock / metal** (dense guitars, fast double-kick).
+7. Optional: **live input**, music played out loud into your microphone.
+
+**What each meter should do**
+| Meter | Should | Problem if |
+|---|---|---|
+| KICK light | flash on every kick drum | misses kicks, or flashes on bass notes / snares |
+| SNARE light | flash on snares and claps | silent on obvious snares |
+| HAT light | flicker with hi-hats / shakers | flickers constantly on noise, or nothing |
+| BPM | settle within ~5 s on the song's tempo (±1) | wrong, or double / half (e.g. 64 for 128) |
+| Beat circle | dot passes the top on each kick | drifts off the beat over time |
+| Bands (sub … air) | bass bars jump on kicks/bass, air on cymbals | a band is stuck at 0 or always maxed |
+| BUILD / DROP | BUILD during a build-up, DROP when it hits | missing, or firing on every chorus |
+| Acoustic song | lights quiet, BPM may stay "searching…" | that is OK, it's not a failure |
+
+**Known and expected:** drum & bass may show half tempo (e.g. 87 for 174). Press **T** in
+time to fix. Bar 1 is a guess until you press **R** on a downbeat.
+
+**How to report a problem to me** (copy this, one block per song):
+```
+Song: Artist – Title (genre, real BPM if you know it)
+Source: file / live mic
+What was wrong: e.g. "KICK missed about half the kicks in the chorus"
+When: e.g. "from 1:20 to 1:45"
+Meter values: e.g. "BPM showed 64, should be 128"
+```
+Best of all: click **Analyse file offline…** for that song and tell me where the
+`.analysis.csv` file is saved. It lets me see every value the analysis produced.

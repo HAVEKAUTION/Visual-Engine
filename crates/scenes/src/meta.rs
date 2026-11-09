@@ -38,6 +38,9 @@ pub struct SceneMeta {
     /// Free-form style tag (psychedelic, minimal, glitch, ...).
     #[serde(default, alias = "STYLE", alias = "CATEGORIES")]
     pub style: serde_json::Value,
+    /// Music the scene is made for, e.g. `["Techno", "Minimal"]`.
+    #[serde(default, alias = "GENRES")]
+    pub genres: Vec<String>,
     #[serde(default, alias = "ISFVSN", alias = "VSN")]
     pub version: serde_json::Value,
     #[serde(default, alias = "INPUTS")]

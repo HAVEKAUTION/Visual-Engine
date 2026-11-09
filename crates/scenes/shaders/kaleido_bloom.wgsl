@@ -2,6 +2,7 @@
   "name": "Kaleido Bloom",
   "author": "Visual Engine",
   "style": "psychedelic",
+  "genres": ["Psytrance", "Trance", "Psychedelic"],
   "description": "A domain-warped fractal folded into a kaleidoscope, with feedback trails. Colour follows how bright the sound is (spectral centroid); bass drives the spin, loudness the flow, kicks punch the zoom.",
   "inputs": [
     { "name": "segments",   "label": "Mirror segments",   "type": "float", "min": 2,    "max": 12,   "default": 6 },
