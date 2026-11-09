@@ -2,6 +2,13 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — Node graph groundwork (paused, not visible in the app yet)
+- Scene files can declare effects (`"kind": "effect"`, `"images"`) and dropdown inputs
+  (`"type": "choice"`). Eight built-in effects: Merge, Glow, Trails, Mirror, Glitch,
+  Colour Grade, Transform, Pixelate. Hidden from the scene list until layers exist.
+- Still to do for step 1: the graph model, per-node rendering, the Layers panel and
+  tests/docs for them.
+
 ## 2026-11-09 — Computer audio (system loopback)
 - New **🔊 Computer audio** button under LIVE INPUT: the visuals follow whatever the
   computer is playing (Spotify, YouTube, a DJ app…), like OBS's desktop audio. Every
