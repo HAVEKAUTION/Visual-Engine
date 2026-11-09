@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use signals::modulation::ModSlot;
 
 use crate::model::{
-    Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, Resolution,
-    WireMod,
+    Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, Resolution, WireMod,
 };
 use crate::types::ParamValue;
 
@@ -120,14 +119,13 @@ impl Graph {
             }
             Command::Disconnect(link) => Command::Connect(self.take_link(&link)?),
             Command::SetParam { node, param, value } => {
-                let p = self
-                    .node_mut(node)?
-                    .param_mut(&param)
-                    .ok_or_else(|| GraphError::NoSuchPort {
+                let p = self.node_mut(node)?.param_mut(&param).ok_or_else(|| {
+                    GraphError::NoSuchPort {
                         node,
                         what: "parameter",
                         name: param.clone(),
-                    })?;
+                    }
+                })?;
                 let value = p
                     .def
                     .sanitise(value)
@@ -140,14 +138,13 @@ impl Graph {
                 }
             }
             Command::SetMods { node, param, mods } => {
-                let p = self
-                    .node_mut(node)?
-                    .param_mut(&param)
-                    .ok_or_else(|| GraphError::NoSuchPort {
+                let p = self.node_mut(node)?.param_mut(&param).ok_or_else(|| {
+                    GraphError::NoSuchPort {
                         node,
                         what: "parameter",
                         name: param.clone(),
-                    })?;
+                    }
+                })?;
                 if !p.def.is_modulatable() && !mods.is_empty() {
                     return Err(GraphError::NotModulatable(param));
                 }
@@ -210,13 +207,21 @@ impl Graph {
                     .position(|g| g.id == id)
                     .ok_or(GraphError::NoSuchGroup(id.0))?;
                 let old = self.groups_mut().remove(i);
-                let mut undo = vec![Command::PutGroup(old.clone())];
+                // Undo: put the group back without its published controls,
+                // move its sub-groups back in, then restore it fully (the
+                // controls may point into those sub-groups).
+                let bare = Group {
+                    published: Vec::new(),
+                    ..old.clone()
+                };
+                let mut undo = vec![Command::PutGroup(bare)];
                 for g in self.groups_mut() {
                     if g.parent == Some(id) {
                         undo.push(Command::PutGroup(g.clone()));
                         g.parent = old.parent;
                     }
                 }
+                undo.push(Command::PutGroup(old));
                 Command::Batch(undo)
             }
             Command::Batch(cmds) => {

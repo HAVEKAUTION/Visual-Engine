@@ -17,7 +17,10 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **M3 – modulation, presets, hotkeys**: done. Link any slider to the music, colour
   palettes, presets on keys 1–9 with crossfades, blackout / flash / intensity keys.
 - **Computer audio**: visuals can follow whatever the computer plays (loopback).
-- **GATE** (a whole song looks great hands-off): next, then M4 (layers, MIDI).
+- **Direction v2** (2026-11-10): one node graph at the core, Looks instead of presets.
+  See `DIRECTION_UPDATE_v2.md`; the parts above that v2 replaces are listed in `CLAUDE.md`.
+- **v2 M2 – graph engine**: in progress. Part 1 done: the graph data model
+  (`crates/graph`). Next: evaluation on the GPU.
 
 ## Running it
 
@@ -42,6 +45,7 @@ crates/
   app/        # the program: window, UI panels, wiring
   audio/      # song decoding, playback, live input, resampling, analysis feed
   analysis/   # (M1) spectrum, bands, onsets, tempo, beat phase, structure
+  graph/      # (v2 M2) node graph data model: typed plugs, wires, groups, undo, save/load
   signals/    # (M1/M3) Signal Bus and modulation rule
   render/     # (M2) wgpu renderer, layers, feedback buffers, outputs
   scenes/     # (M2) built-in scene shaders

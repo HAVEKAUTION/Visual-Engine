@@ -2,6 +2,16 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M2 part 1: graph data model (`graph` crate)
+- New `graph` crate, data only (no GPU, no UI): numbered and labelled nodes, typed plugs
+  (Image, Mask, Signal, Trigger), wires checked for type and loops, Signal wires into
+  parameters (carrying the mapping rule's shape and depth), groups inside groups with
+  published controls, per-node resolution and bypass.
+- Every image node gets an optional Mask input automatically.
+- Every edit is a reversible command: undo/redo, with slider drags merged into one step.
+- Save / load as RON; broken files are reported instead of loaded.
+- 13 tests. Nothing changes in the app yet.
+
 ## 2026-11-10 — Node graph groundwork (paused, not visible in the app yet)
 - Scene files can declare effects (`"kind": "effect"`, `"images"`) and dropdown inputs
   (`"type": "choice"`). Eight built-in effects: Merge, Glow, Trails, Mirror, Glitch,

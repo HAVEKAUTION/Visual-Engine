@@ -211,7 +211,10 @@ pub enum GraphError {
         name: String,
     },
     #[error("a {from} wire can't go into a {to} input")]
-    TypeMismatch { from: &'static str, to: &'static str },
+    TypeMismatch {
+        from: &'static str,
+        to: &'static str,
+    },
     #[error("only Signal wires can drive a parameter")]
     NotASignal,
     #[error("\"{0}\" can't be modulated (only number parameters can)")]
@@ -342,9 +345,9 @@ impl Graph {
 
     /// The wire plugged into an input, if any.
     pub fn input_link(&self, node: NodeId, port: &str) -> Option<&Link> {
-        self.links.iter().find(|l| {
-            matches!(&l.to, Endpoint::Input { node: n, port: p } if *n == node && p == port)
-        })
+        self.links.iter().find(
+            |l| matches!(&l.to, Endpoint::Input { node: n, port: p } if *n == node && p == port),
+        )
     }
 
     /// Signal wires driving a parameter.
@@ -506,7 +509,10 @@ impl Graph {
         }
         for pp in &g.published {
             let in_group = self.group_contains(g, pp.node);
-            let has = self.node(pp.node).and_then(|n| n.param(&pp.param)).is_some();
+            let has = self
+                .node(pp.node)
+                .and_then(|n| n.param(&pp.param))
+                .is_some();
             if !in_group || !has {
                 return Err(bad(format!(
                     "published control \"{}\" points at a parameter outside the group",

@@ -315,3 +315,22 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   app (or for Terminal, if started from Terminal). Click Allow. If you said no: System
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
+
+## v2 M2 part 1 – Graph data model (no visible change)
+
+This step only adds the graph's "brain" (what can connect to what, undo, saving).
+There is nothing new to see in the app yet. To check it:
+
+- [ ] Run `cargo test -p graph`. It should end with **13 passed; 0 failed**.
+- [ ] Run the app as usual (`cargo run --release -p app`): everything works exactly as
+      before (scenes, presets, keys, computer audio).
+
+What the tests prove, in plain English:
+- A wire only goes where its type fits (a Signal can't go into a picture input, a
+  picture can't drive a slider); a picture *can* be used as a mask.
+- Wires can't make loops.
+- Plugging into an input that's already used replaces the old wire.
+- Every edit can be undone and redone, and a whole slider drag undoes in one go.
+- Deleting a node removes its wires and group spot; undo brings it all back.
+- Groups can sit inside groups and publish controls from anywhere inside them.
+- Saving and loading gives back exactly the same graph; broken files are refused.

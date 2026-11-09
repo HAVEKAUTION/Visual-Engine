@@ -15,8 +15,8 @@ pub mod types;
 
 pub use command::{Command, History};
 pub use model::{
-    Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef,
-    PublishedParam, Resolution, WireMod,
+    Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, PublishedParam,
+    Resolution, WireMod,
 };
 pub use types::{NodeSpec, Param, ParamDef, ParamValue, PortDef, PortType};
 
