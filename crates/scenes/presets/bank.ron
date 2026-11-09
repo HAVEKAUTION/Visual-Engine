@@ -1,11 +1,11 @@
 [
-    Some("warehouse_tunnel/Concrete"),
-    Some("warehouse_tunnel/Acid Corridor"),
-    Some("canopy_breaks/Deep Jungle"),
-    Some("radial_spectrum/Clean Ring"),
-    Some("crt_glitch/Night Drive"),
+    None,
+    None,
+    None,
+    None,
+    None,
     Some("midnight_window/Rainy Night"),
-    Some("aurora_drift/Northern Sky"),
+    None,
     Some("iron_furnace/Forge"),
     Some("velvet_mirrorball/Saturday Night"),
 ]

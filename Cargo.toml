@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 analysis = { path = "crates/analysis" }
 audio = { path = "crates/audio" }
+graph = { path = "crates/graph" }
 render = { path = "crates/render" }
 scenes = { path = "crates/scenes" }
 signals = { path = "crates/signals" }

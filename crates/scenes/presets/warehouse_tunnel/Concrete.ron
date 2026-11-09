@@ -1,9 +1,0 @@
-(
-    name: "Concrete",
-    scene: "warehouse_tunnel.wgsl",
-    values: {
-    },
-    mods: {
-    },
-    palette: Scene,
-)

@@ -1,0 +1,70 @@
+(
+    name: "1",
+    scene: "canopy_breaks.wgsl",
+    values: {
+        "chop": [
+            0.2,
+        ],
+        "density": [
+            0.56,
+        ],
+        "glow": [
+            0.55,
+        ],
+        "scroll_speed": [
+            0.5,
+        ],
+        "sub_warp": [
+            0.8,
+        ],
+        "trails": [
+            0.58,
+        ],
+    },
+    mods: {
+        "density": [
+            (
+                source: Signal("loudness_slow"),
+                shape: Linear,
+                depth: 0.0,
+                enabled: true,
+            ),
+        ],
+        "glow": [
+            (
+                source: Signal("drop_age"),
+                shape: Lfo(
+                    rate: 1.0,
+                ),
+                depth: 0.25,
+                enabled: true,
+            ),
+        ],
+        "scroll_speed": [
+            (
+                source: Signal("onset_rate"),
+                shape: Linear,
+                depth: -0.9,
+                enabled: true,
+            ),
+            (
+                source: Random(
+                    rate: 2.3,
+                    seed: 755188700,
+                ),
+                shape: Linear,
+                depth: -0.57,
+                enabled: true,
+            ),
+        ],
+        "sub_warp": [
+            (
+                source: Signal("drop_age"),
+                shape: Linear,
+                depth: -0.35,
+                enabled: true,
+            ),
+        ],
+    },
+    palette: Scene,
+)
