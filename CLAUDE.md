@@ -1,8 +1,25 @@
 # Audio-Reactive Visual Engine (working title)
 
-A native desktop app (Windows + macOS) that analyses music in real time and drives
-live, performable visuals: shaders, 3D, minimal and glitch styles. Built for live VJ
-sets (keyboard, MIDI, fully automatic), stream output and 4K video export.
+## ⚠ Direction v2: read these first
+
+The plan changed on 2026-11-10. Every session must read, in this order:
+
+1. **`DIRECTION_UPDATE_v2.md`**: the current direction (one node graph, Looks instead
+   of presets, media inputs, one workspace UI, safety, milestones M0–M10).
+   **Where it disagrees with this file or with existing code, it wins**, unless that
+   would throw away working, tested code: then flag it and propose a migration first.
+2. **`BUILD_STEPS_v2.md`**: the step-by-step prompts per milestone. The user gives
+   them one at a time; do only the step asked for.
+
+This file keeps the rules that did not change (how we work, threading, the audio
+maths) and records what in the code is now **legacy**.
+
+---
+
+A native desktop app (Windows + macOS) for live, music-driven visuals. Audio, images,
+video files and live cameras flow through **one node graph** (DaVinci Resolve-inspired,
+simplified). Built for live VJ sets (keyboard, MIDI, fully automatic), stream output
+and 4K video export.
 
 ## Who's who
 
@@ -19,39 +36,57 @@ sets (keyboard, MIDI, fully automatic), stream output and 4K video export.
   state that doesn't build.
 - If something needs the user to install or click something, give step-by-step
   instructions for both Windows and macOS.
+- If the brief conflicts with existing code, say so and propose a migration before
+  rewriting anything large.
 
 ## Tech stack
 
 - Language: **Rust** (stable, latest), Cargo workspace.
 - GPU: **wgpu**, shaders in **WGSL** (naga for importing GLSL later).
-- Window + UI: **eframe/egui** with the wgpu backend (winit underneath).
+- Window + UI: **eframe/egui** with the wgpu backend, heavily custom-styled.
 - Audio I/O: **cpal**. Decoding: **symphonia** (MP3, WAV, FLAC, OGG).
 - FFT: **realfft**. Lock-free audio → analysis handoff: **rtrb** ring buffer.
-- Later: **midir** (MIDI), **rosc** (OSC), Spout (Windows) / Syphon (macOS) / NDI
-  output, **ffmpeg** (spawned process) for video export, Ableton Link.
-- Presets/config: **serde** + RON or TOML. Errors: **anyhow**/**thiserror**. Logs: **log** + **env_logger**.
+- Media (v2, M4): **ffmpeg** for video, a camera crate (nokhwa or best current),
+  **image** for stills. See `DIRECTION_UPDATE_v2.md`.
+- Later: **midir** (MIDI), **rosc** (OSC), Spout / Syphon / NDI output, ffmpeg for
+  export, Ableton Link, ONNX Runtime for segmentation.
+- Project / Look files: **serde** + RON. Errors: **anyhow**/**thiserror**. Logs: **log** + **env_logger**.
 - Use current versions of crates; check they compile together before committing.
+  (`egui-snarl` does not support our egui version: the node editor is custom.)
 
 ## Architecture (crates in the workspace)
 
+Target layout (v2):
+
 ```
 crates/
-  app/        # binary: window, UI panels, wiring
-  audio/      # input sources (file, mic/line-in, system loopback), playback
-  analysis/   # pure DSP: spectrum, bands, onsets, tempo, beat phase, structure
-  signals/    # the Signal Bus: named, normalised signals + modulation rule
-  render/     # wgpu renderer, scene graph, layers, feedback buffers, outputs
-  scenes/     # built-in scene shaders (.wgsl + metadata header)
+  app/        # binary: window, workspace UI, wiring
+  audio/      # audio sources (file, mic/line-in, loopback), playback
+  analysis/   # pure DSP: spectrum, bands, onsets, tempo, phase, structure
+  media/      # video decode, camera capture, image loading -> GPU textures   (new, M4)
+  graph/      # node graph data model, evaluation, undo/redo, serialisation  (new, M2)
+  nodes/      # built-in node implementations (+ their WGSL)                 (from scenes/)
+  signals/    # signal bus + modulation rule
+  render/     # wgpu device, texture pool, compositor, outputs, export
+  looks/      # signature Looks, Look DNA (mutate/breed), Director           (new, M6)
 ```
 
+Today the code has `app`, `audio`, `analysis`, `signals`, `render` and `scenes`.
+`scenes` (shader header format, compile/validation, prelude, hot reload, clocks,
+palettes) is planned to become `nodes`; see the migration below.
+
+Threading rules (non-negotiable):
 - `analysis` must be **pure and deterministic**: same samples in → same signals out.
   It must run both live and offline (for tests and for video export).
 - The audio callback thread is real-time: **no allocation, no locks, no I/O, no
   logging** inside it. Push samples into an rtrb ring buffer and return.
-- Analysis runs on its own thread; it publishes a `SignalFrame` snapshot that the
-  render thread reads (triple buffer or atomic swap, never blocking the renderer).
+- Analysis, video decode and camera capture each run on their own threads and hand
+  the newest result to the renderer **without blocking it** (latest-frame-wins).
+- The output must never stall because of UI work, file loading or a bad shader. A
+  failing node outputs its last good frame (or passes its input through) and shows an
+  error badge.
 
-## The maths spec (implement exactly; tune constants via config)
+## The maths spec (unchanged in v2; implement exactly; tune constants via config)
 
 All signals are updated every hop (~94 times/sec) and **normalised so 1.0 = typical
 for the current song**. All smoothing uses elapsed time, never frame counts, so the feel
@@ -91,33 +126,48 @@ is identical at any frame rate.
     synced to beat/bar phase, a MIDI/keyboard control or a random walk, and S is a
     shape: curve `x^g`, beat envelope `exp(−(t−t_hit)/decay)`, phase pulse
     `(1−φ)^k`, synced LFO `sin(2π·rate·bar_phase)`, step `floor(n·x)/n`.
+    In v2 a Signal wire into a parameter and the Inspector's modulation editor are
+    the same data underneath (this rule).
 11. **Design rule: drive speed, not position.** Motion parameters integrate an
     audio-modulated speed (`θ += v0·(1 + a·ℓ_slow)·Δt`) instead of jumping.
 
-## Scenes and the control model
+v2 adds video signals (`motion`, `motion_x`, `motion_y`, `brightness`, `video_hue`) to
+the bus in M4; see `DIRECTION_UPDATE_v2.md`.
 
-- Presets, Layers and Nodes are **three views of one scene graph**, not three systems.
-  A preset = a saved scene graph. A layer = a node chain shown as a stack.
-- A scene/effect = a WGSL shader + a metadata header (ISF-style JSON: name, inputs,
-  ranges, defaults, passes, persistent buffers). Every declared input is
-  automatically modulatable with the mapping rule.
-- Every scene receives one uniform block with all signals (bands, fast/slow, onsets,
-  bpm, phases, structure flags, centroid, time, resolution).
-- Feedback (previous frame) buffers are a first-class feature.
+## Legacy (v1) parts still in the code
+
+These work and are tested, but are **out of date** with v2. Keep them working until
+the v2 milestone that replaces them; don't extend them.
+
+| v1 part (in the code today) | v2 replacement | Replaced in |
+|---|---|---|
+| Scene picker + side panels (`app/src/scene_view.rs`, `ui.rs`) | One workspace: viewer, inspector, node graph, signal strip; Tab = Perform | M3 |
+| Debug meter panel | Signal strip | M3 |
+| Two render "decks" with crossfade (`render`) | Texture pool + graph evaluation | M2 |
+| `scenes` crate (header format, compile, hot reload, clocks, palettes) | `nodes` crate; scenes become Shader Generator nodes | M2 |
+| Effect modules `shaders/fx_*.wgsl` (Merge, Glow, Trails, Mirror, Glitch, Colour Grade, Transform, Pixelate) | v2 nodes (Merge, Glow, Echo/Trails, Mirror/Kaleido, RGB Split, Hue Shift/Gradient Map, Transform, Posterize). Merge must move to the exact W3C blend maths | M2 / M5 |
+| Presets (`scenes/presets/*.ron`), key bank 1–9 | **No generic presets**: 6–8 signature Looks + Look DNA | M6 |
+| Blackout, flash, intensity, speed, macros (`app/src/perform.rs`) | Perform mode, Director, safety guard, panic key | M7 |
+
+Removed ideas: the "Presets, Layers and Nodes are three views of one scene graph"
+model and the planned Perform/Build/Audio pages. In v2 the node graph is the core,
+layers are built from nodes (Layer Mixer), and there is one workspace with no pages.
+
+Strobes and flashes have no photosensitivity guard until M7: keep every strobe
+default **off**.
 
 ## Milestones
 
-- M0 App shell: window, load song / pick mic, playback.
-- M1 Analysis + live meters (debug panel showing every signal).
-- GATE: meters match kicks, snares, tempo on the user's own songs.
-- M2 First scenes (one per style) with feedback, shader hot-reload.
-- M3 Modulation + presets + keyboard hotkeys.
-- GATE: a whole song looks great hands-off.
-- M4 Layers, blend modes, MIDI learn.
-- M5 Auto-pilot (builds/drops/phrases) + outputs (2nd screen fullscreen, Spout/Syphon/NDI).
-- GATE: a full live set without a crash.
-- M6 Node editor, ISF/Shadertoy import, 3D scenes.
-- M7 Record a set → re-render as 4K video (ffmpeg), Ableton Link.
+**Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`**, built with the
+steps in `BUILD_STEPS_v2.md`. Next up: **v2 M2, the graph engine** (BUILD_STEPS_v2
+Step 1).
+
+Done so far (v1 numbering, kept for history):
+- M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.
+  These match v2 M0/M1.
+- v1 M2 scenes + hot reload, genre scene pack, v1 M3 modulation + presets + palettes +
+  hotkeys, computer-audio loopback, node-graph groundwork (effect modules). Now
+  legacy, see above.
 
 Do one milestone (or one part of a milestone) per task. Don't start the next
 milestone's features early.
