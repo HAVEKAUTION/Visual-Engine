@@ -6,8 +6,10 @@ use std::time::Instant;
 use audio::{AudioEngine, InputDevice, Song, Source};
 use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
-use crate::analysis_thread::{self, WaveformSnapshot};
+use crate::analysis_thread::{self, Command, WaveformSnapshot};
 use crate::debug_panel;
+use crate::offline::{self, OfflineReport};
+use crate::rhythm_panel::RhythmView;
 
 const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 12);
 const PANEL_BG: Color32 = Color32::from_rgb(20, 20, 26);
@@ -18,6 +20,11 @@ pub struct VisualEngineApp {
     engine: AudioEngine,
     waveform: triple_buffer::Output<WaveformSnapshot>,
     signals: signals::SignalReader,
+    commands: std::sync::mpsc::Sender<Command>,
+    rhythm_view: RhythmView,
+    /// Offline analysis in progress: (file name, result channel).
+    offline_job: Option<(String, Receiver<anyhow::Result<OfflineReport>>)>,
+    offline_result: Option<Result<OfflineReport, String>>,
     show_meters: bool,
     /// For the hops-per-second readout: (hop index, when) of the last sample.
     hop_rate_mark: (u64, Instant),
@@ -53,12 +60,17 @@ impl VisualEngineApp {
         let (input, output) = triple_buffer::triple_buffer(&WaveformSnapshot::default());
         // The thread stops by itself when the engine (and its sender) is dropped.
         let (publisher, reader) = signals::bus();
-        let _ = analysis_thread::spawn(feeds, input, publisher);
+        let (commands, command_rx) = std::sync::mpsc::channel();
+        let _ = analysis_thread::spawn(feeds, input, publisher, command_rx);
 
         let mut app = Self {
             engine,
             waveform: output,
             signals: reader,
+            commands,
+            rhythm_view: RhythmView::default(),
+            offline_job: None,
+            offline_result: None,
             show_meters: true,
             hop_rate_mark: (0, Instant::now()),
             hops_per_sec: 0.0,
@@ -160,7 +172,7 @@ impl VisualEngineApp {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.heading("Visual Engine");
-        ui.label(RichText::new("Milestone 1 · analysis").weak());
+        ui.label(RichText::new("Milestone 1 · analysis + rhythm").weak());
         ui.add_space(12.0);
 
         // ---------------- Song file ----------------
@@ -315,6 +327,95 @@ impl VisualEngineApp {
         ui.label(RichText::new("ANALYSIS").strong());
         ui.separator();
         ui.checkbox(&mut self.show_meters, "Show signal meters");
+        ui.horizontal(|ui| {
+            if ui
+                .button("Tap (T)")
+                .on_hover_text("Tap along with the beat")
+                .clicked()
+            {
+                self.send(Command::Tap);
+            }
+            if ui
+                .button("Downbeat (R)")
+                .on_hover_text("Press on beat 1 of a bar: makes it bar 1, beat 1")
+                .clicked()
+            {
+                self.send(Command::ResyncDownbeat);
+            }
+            let manual = self.signals.latest().rhythm.tempo_manual;
+            if ui
+                .add_enabled(manual, egui::Button::new("Auto tempo"))
+                .on_hover_text("Forget the tapped tempo")
+                .clicked()
+            {
+                self.send(Command::AutoTempo);
+            }
+        });
+
+        ui.add_space(6.0);
+        let busy = self.offline_job.is_some();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !busy,
+                    egui::Button::new("\u{1F4CA} Analyse file offline\u{2026}"),
+                )
+                .on_hover_text("Analyse a whole song as fast as possible and save a CSV next to it")
+                .clicked()
+            {
+                self.start_offline_analysis();
+            }
+            if let Some((name, _)) = &self.offline_job {
+                ui.spinner();
+                ui.label(format!("Analysing {name}\u{2026}"));
+            }
+        });
+        let mut reveal = None;
+        match &self.offline_result {
+            Some(Ok(report)) => {
+                ui.label(
+                    RichText::new(format!(
+                        "Saved {}",
+                        report
+                            .csv_path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    ))
+                    .color(WAVE_COLOR),
+                );
+                ui.label(RichText::new(report.summary()).small());
+                if ui.small_button("Show in folder").clicked() {
+                    reveal = Some(report.csv_path.clone());
+                }
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(e).color(ERROR_COLOR));
+            }
+            None => {}
+        }
+        if let Some(path) = reveal {
+            offline::reveal_in_file_manager(&path);
+        }
+
+        ui.add_space(14.0);
+        ui.label(RichText::new("EVENTS").strong());
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .max_height(170.0)
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                if self.rhythm_view.log.is_empty() {
+                    ui.label(
+                        RichText::new("Builds, drops and section changes appear here.")
+                            .small()
+                            .weak(),
+                    );
+                }
+                for e in &self.rhythm_view.log {
+                    ui.label(RichText::new(&e.text).monospace().small().color(e.color));
+                }
+            });
 
         if let Some(err) = &self.error {
             ui.add_space(12.0);
@@ -403,6 +504,51 @@ impl VisualEngineApp {
 }
 
 impl VisualEngineApp {
+    fn send(&self, cmd: Command) {
+        let _ = self.commands.send(cmd);
+    }
+
+    fn start_offline_analysis(&mut self) {
+        let picked = rfd::FileDialog::new()
+            .set_title("Analyse file offline")
+            .add_filter("Audio", audio::decode::SUPPORTED_EXTENSIONS)
+            .pick_file();
+        if let Some(path) = picked {
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            log::info!("offline analysis of {}", path.display());
+            self.offline_result = None;
+            self.offline_job = Some((name, offline::analyse_in_background(path)));
+        }
+    }
+
+    fn poll_offline(&mut self) {
+        let Some((name, rx)) = &self.offline_job else {
+            return;
+        };
+        let result = match rx.try_recv() {
+            Ok(r) => r,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                Err(anyhow::anyhow!("the analysis stopped unexpectedly"))
+            }
+        };
+        let name = name.clone();
+        self.offline_job = None;
+        self.offline_result = Some(match result {
+            Ok(report) => {
+                log::info!("offline analysis of {name}: {}", report.summary());
+                Ok(report)
+            }
+            Err(e) => {
+                log::error!("offline analysis of {name} failed: {e:#}");
+                Err(format!("Could not analyse {name}: {e:#}"))
+            }
+        });
+    }
+
     /// Measure how many analysis hops arrive per second (should be ~93.75).
     fn update_hop_rate(&mut self, hop_index: u64) {
         let (last_hop, since) = self.hop_rate_mark;
@@ -422,6 +568,7 @@ impl VisualEngineApp {
 impl eframe::App for VisualEngineApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_loading();
+        self.poll_offline();
         self.check_stream_errors();
         // The preview is live, so keep redrawing.
         ctx.request_repaint();
@@ -439,16 +586,32 @@ impl eframe::App for VisualEngineApp {
             )
             .show(ui, |ui| self.side_panel(ui));
 
+        // Manual rhythm controls (keyboard).
+        let (tap, resync) =
+            ui.input(|i| (i.key_pressed(egui::Key::T), i.key_pressed(egui::Key::R)));
+        if tap {
+            self.send(Command::Tap);
+        }
+        if resync {
+            self.send(Command::ResyncDownbeat);
+        }
+
+        let frame = self.signals.latest().clone();
+        let song_pos = match self.engine.source() {
+            Source::File(p) => Some(p.position_secs()),
+            _ => None,
+        };
+        self.rhythm_view.update(&frame, song_pos);
         if self.show_meters {
-            let frame = self.signals.latest().clone();
             self.update_hop_rate(frame.hop_index);
             let rate = self.hops_per_sec;
+            let view = &self.rhythm_view;
             egui::Panel::bottom("signals")
                 .resizable(true)
-                .default_size(300.0)
-                .size_range(200.0..=600.0)
+                .default_size(440.0)
+                .size_range(340.0..=700.0)
                 .frame(egui::Frame::NONE.fill(PANEL_BG))
-                .show(ui, |ui| debug_panel::show(ui, &frame, rate));
+                .show(ui, |ui| debug_panel::show(ui, &frame, rate, view));
         }
 
         egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui));

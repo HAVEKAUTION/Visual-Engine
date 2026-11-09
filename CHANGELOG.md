@@ -2,6 +2,20 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — M1 part 2: rhythm and structure
+- Onsets: spectral flux with adaptive threshold (λ·median + κ, 50 ms minimum gap),
+  overall + kick/snare/hat; one-bin max filter stops kick pitch sweeps double-triggering.
+  Onset times calibrated to within a few ms.
+- Tempo: weighted autocorrelation (log-Gaussian around 120 BPM), sub-hop precision,
+  smoothing, confirmed jumps, held in silence.
+- Beat clock: phase locked to kicks, beat/bar/phrase phase and counters.
+- Structure: build (loudness slope + rising onset rate), drop (bass jump after a build,
+  re-aligns the phrase grid), section change (cosine distance of 4-bar spectra).
+- Debug panel: onset lights, BPM, beat-phase circle, bar/phrase counters, build meter;
+  event log in the side panel.
+- T = tap tempo, R = resync downbeat, "Auto tempo" button.
+- "Analyse file offline" (and `--analyse` on the command line) saves a CSV per hop.
+
 ## 2026-11-09 — M1 part 1: analysis core
 - `analysis` crate: STFT spectrum (N 2048, H 512, Hann, `ln(1+100|X|)`), 32 mel bands +
   six named bands, per-band auto-gain (8 s running mean, 1.0 = typical, clamp 8),

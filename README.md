@@ -8,7 +8,9 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **M0 – app shell**: done. Window, song playback / live input, live waveform.
 - **M1 part 1 – analysis core**: done. Spectrum, 32 mel + 6 named bands, auto-gain,
   fast/slow smoothing, centroid, loudness, with a live meter panel.
-- **M1 part 2** (onsets, tempo, beat phase, structure): next.
+- **M1 part 2 – rhythm and structure**: done. Kick/snare/hat onsets, BPM, beat/bar/
+  phrase clock, build/drop/section change, tap tempo, offline CSV export.
+- **GATE** (meters match kicks, snares and tempo on your own songs): next.
 
 ## Running it
 
@@ -19,6 +21,9 @@ cargo run --release
 ```
 
 To open a song straight away: `cargo run --release -- "C:/Music/song.mp3"` (any path works).
+
+To analyse songs without opening the window (writes `<song>.analysis.csv` next to each):
+`cargo run --release -- --analyse "C:/Music/a.mp3" "C:/Music/b.flac"`.
 
 The first build downloads and compiles dependencies and takes a few minutes; later
 builds are quick.

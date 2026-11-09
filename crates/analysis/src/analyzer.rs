@@ -1,8 +1,9 @@
 //! The analysis core: samples in, [`SignalFrame`]s out.
 //!
-//! Pure and deterministic: the output depends only on the samples fed in (and
-//! the config), never on wall-clock time or how the samples were chunked. It
-//! runs the same way live (analysis thread) and offline (tests, video export).
+//! Pure and deterministic: the output depends only on the samples fed in, the
+//! config and the manual commands (tap / resync), never on wall-clock time or
+//! how the samples were chunked. It runs the same way live (analysis thread)
+//! and offline (tests, CSV export, video export).
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -12,8 +13,12 @@ use realfft::{RealFftPlanner, RealToComplex};
 use signals::{Band, BandSignal, MEL_BANDS, SignalFrame};
 
 use crate::bands::{bins_for, mel_edges};
+use crate::beat::BeatClock;
 use crate::config::AnalysisConfig;
+use crate::onset::{OnsetDetector, spectral_flux};
 use crate::smoothing::{AutoGain, Smoother};
+use crate::structure::StructureDetector;
+use crate::tempo::TempoTracker;
 
 /// Auto-gain plus fast/slow smoothing for one signal.
 #[derive(Clone, Copy, Debug)]
@@ -47,6 +52,14 @@ fn power_db(p: f32) -> f32 {
     10.0 * (p + 1e-12).log10()
 }
 
+/// Which onset detector is which.
+const ONSET_ALL: usize = 0;
+const ONSET_KICK: usize = 1;
+const ONSET_SNARE: usize = 2;
+
+/// Length of the ring of recent onset times used for `onset_rate`.
+const ONSET_TIMES: usize = 256;
+
 pub struct Analyzer {
     cfg: AnalysisConfig,
     fft: Arc<dyn RealToComplex<f32>>,
@@ -65,16 +78,35 @@ pub struct Analyzer {
     scratch: Vec<Complex<f32>>,
     /// |X[k]| (scaled), k = 0..=N/2.
     magnitude: Vec<f32>,
-    /// Y[k] = ln(1 + gamma |X[k]|).
+    /// Y[k] = ln(1 + gamma |X[k]|), this hop and the previous one.
     log_spectrum: Vec<f32>,
+    prev_log_spectrum: Vec<f32>,
 
     mel_bins: Vec<Range<usize>>,
     named_bins: Vec<Range<usize>>,
     mel: Vec<Channel>,
     named: Vec<Channel>,
     loudness: Channel,
-    /// Raw band energies of the last hop (for tests/debugging).
+    /// Raw band energies of the last hop.
     named_energy: [f32; Band::COUNT],
+    mel_energy: [f32; MEL_BANDS],
+
+    /// Bins for the all / kick / snare / hat onset detectors.
+    onset_bins: [Range<usize>; 4],
+    onsets: Vec<OnsetDetector>,
+    onset_times: [f64; ONSET_TIMES],
+    onset_times_pos: usize,
+    last_onset_time: f64,
+    last_kick_time: f64,
+
+    tempo: TempoTracker,
+    beat: BeatClock,
+    structure: StructureDetector,
+
+    // Manual commands, applied at the next hop.
+    tap_pending: bool,
+    resync_pending: bool,
+    clear_manual_pending: bool,
 
     frame: SignalFrame,
 }
@@ -103,10 +135,30 @@ impl Analyzer {
             .map(|&(lo, hi)| bins_for(&cfg, lo, hi))
             .collect();
 
+        // all = whole spectrum, kick = sub+bass, snare = low_mid+mid, hat = air.
+        let nb = &cfg.named_bands;
+        let onset_bins = [
+            1..n / 2 + 1,
+            bins_for(&cfg, nb[Band::Sub.index()].0, nb[Band::Bass.index()].1),
+            bins_for(&cfg, nb[Band::LowMid.index()].0, nb[Band::Mid.index()].1),
+            bins_for(&cfg, nb[Band::Air.index()].0, nb[Band::Air.index()].1),
+        ];
+        let hop_s = cfg.hop_seconds();
+        let onsets = (0..4)
+            .map(|_| OnsetDetector::new(&cfg.onsets, hop_s))
+            .collect();
+
         let fft_in = fft.make_input_vec();
         let fft_out = fft.make_output_vec();
         let scratch = fft.make_scratch_vec();
         let bins = n / 2 + 1;
+
+        let mut frame = SignalFrame {
+            dt: hop_s,
+            ..Default::default()
+        };
+        frame.rhythm.bpm = cfg.tempo.prior_bpm;
+        frame.rhythm.phrase_bars = cfg.beat.phrase_bars;
 
         Self {
             fft,
@@ -120,16 +172,27 @@ impl Analyzer {
             scratch,
             magnitude: vec![0.0; bins],
             log_spectrum: vec![0.0; bins],
+            prev_log_spectrum: vec![0.0; bins],
             mel_bins,
             named_bins,
             mel: vec![Channel::new(&cfg); MEL_BANDS],
             named: vec![Channel::new(&cfg); Band::COUNT],
             loudness: Channel::new(&cfg),
             named_energy: [0.0; Band::COUNT],
-            frame: SignalFrame {
-                dt: cfg.hop_seconds(),
-                ..Default::default()
-            },
+            mel_energy: [0.0; MEL_BANDS],
+            onset_bins,
+            onsets,
+            onset_times: [f64::NEG_INFINITY; ONSET_TIMES],
+            onset_times_pos: 0,
+            last_onset_time: f64::NEG_INFINITY,
+            last_kick_time: f64::NEG_INFINITY,
+            tempo: TempoTracker::new(&cfg.tempo, 1.0 / hop_s),
+            beat: BeatClock::new(&cfg.beat),
+            structure: StructureDetector::new(&cfg.structure, cfg.slow, cfg.log_gamma),
+            tap_pending: false,
+            resync_pending: false,
+            clear_manual_pending: false,
+            frame,
             cfg,
         }
     }
@@ -159,6 +222,21 @@ impl Analyzer {
         &self.named_energy
     }
 
+    /// Tap tempo: a tap happens now (applied at the next hop). Each tap is a beat.
+    pub fn tap(&mut self) {
+        self.tap_pending = true;
+    }
+
+    /// Make the beat nearest to now the downbeat (beat 1, bar 1 of a phrase).
+    pub fn resync_downbeat(&mut self) {
+        self.resync_pending = true;
+    }
+
+    /// Return to fully automatic tempo after tap tempo.
+    pub fn clear_manual_tempo(&mut self) {
+        self.clear_manual_pending = true;
+    }
+
     /// Feed samples (mono, at `config.sample_rate`). `on_frame` is called once
     /// per completed hop. Does not allocate.
     pub fn push(&mut self, samples: &[f32], mut on_frame: impl FnMut(&SignalFrame)) {
@@ -178,6 +256,12 @@ impl Analyzer {
     fn process_hop(&mut self) {
         let n = self.ring.len();
         let dt = self.cfg.hop_seconds();
+        self.frame.hop_index += 1;
+        let now =
+            self.frame.hop_index as f64 * self.cfg.hop_size as f64 / self.cfg.sample_rate as f64;
+        let prev_time = now - dt as f64;
+        self.frame.time = now;
+        self.frame.dt = dt;
 
         // 1. Spectrum: window the last N samples (oldest first) and FFT.
         let mut sum_sq = 0.0f32;
@@ -191,6 +275,7 @@ impl Analyzer {
             self.fft
                 .process_with_scratch(&mut self.fft_in, &mut self.fft_out, &mut self.scratch);
 
+        std::mem::swap(&mut self.log_spectrum, &mut self.prev_log_spectrum);
         let gamma = self.cfg.log_gamma;
         let mut weighted = 0.0f32;
         let mut total = 0.0f32;
@@ -207,6 +292,7 @@ impl Analyzer {
         // 2-4. Bands -> auto-gain -> fast/slow.
         for (b, bins) in self.mel_bins.iter().enumerate() {
             let e = mean_power(&self.magnitude[bins.clone()]);
+            self.mel_energy[b] = e;
             self.frame.mel[b] = self.mel[b].update(e, dt).fast;
         }
         for (b, bins) in self.named_bins.iter().enumerate() {
@@ -229,10 +315,144 @@ impl Analyzer {
             self.frame.centroid_hue = ((c / lo).log2() / (hi / lo).log2()).clamp(0.0, 1.0);
         }
 
-        self.frame.hop_index += 1;
-        self.frame.time =
-            self.frame.hop_index as f64 * self.cfg.hop_size as f64 / self.cfg.sample_rate as f64;
-        self.frame.dt = dt;
+        self.rhythm_and_structure(now, prev_time, dt);
+    }
+
+    /// Spec items 5–8.
+    fn rhythm_and_structure(&mut self, now: f64, prev_time: f64, dt: f32) {
+        let r = &mut self.frame.rhythm;
+        for t in [
+            &mut r.onset,
+            &mut r.kick,
+            &mut r.snare,
+            &mut r.hat,
+            &mut r.beat,
+        ] {
+            t.fired = false;
+        }
+        let s = &mut self.frame.structure;
+        for t in [&mut s.build, &mut s.drop, &mut s.section_change] {
+            t.fired = false;
+        }
+
+        // 5. Onsets: spectral flux per detector, adaptive threshold, peak picking.
+        // (The very first hop has no previous spectrum to compare with.)
+        let first = self.frame.hop_index == 1;
+        for d in 0..4 {
+            let bins = self.onset_bins[d].clone();
+            let flux = if first {
+                0.0
+            } else {
+                spectral_flux(
+                    &self.log_spectrum,
+                    &self.prev_log_spectrum,
+                    bins,
+                    self.cfg.onsets.max_filter_bins,
+                )
+            };
+            if let Some(o) = self.onsets[d].process(flux, prev_time) {
+                let time = prev_time - self.cfg.onsets.time_offset as f64;
+                let r = &mut self.frame.rhythm;
+                let trigger = match d {
+                    ONSET_ALL => &mut r.onset,
+                    ONSET_KICK => &mut r.kick,
+                    ONSET_SNARE => &mut r.snare,
+                    _ => &mut r.hat,
+                };
+                trigger.fire(time, o.strength);
+                if d == ONSET_ALL {
+                    self.last_onset_time = time;
+                    self.onset_times[self.onset_times_pos] = time;
+                    self.onset_times_pos = (self.onset_times_pos + 1) % ONSET_TIMES;
+                }
+                if d == ONSET_KICK {
+                    self.last_kick_time = time;
+                }
+            }
+        }
+        let window = self.cfg.onsets.rate_window as f64;
+        let recent = self
+            .onset_times
+            .iter()
+            .filter(|&&t| now - t <= window)
+            .count();
+        self.frame.rhythm.onset_rate = recent as f32 / window as f32;
+
+        // 6. Tempo.
+        if self.clear_manual_pending {
+            self.clear_manual_pending = false;
+            self.tempo.clear_manual();
+        }
+        self.tempo
+            .process(self.onsets[ONSET_ALL].novelty(), now - self.last_onset_time);
+        if self.tap_pending {
+            self.tap_pending = false;
+            self.tempo.tap(now);
+            if self.tempo.manual() {
+                self.beat.set_beat(0.0, self.tempo.bpm());
+            }
+        }
+        let bpm = self.tempo.bpm();
+
+        // 7. Beat clock: advance, then let this hop's onset pull the phase.
+        let new_beat = self.beat.advance(bpm, dt);
+        if self.tempo.locked() {
+            let r = &self.frame.rhythm;
+            let kick_recent = now - self.last_kick_time < self.cfg.beat.kick_fallback_secs as f64;
+            if r.kick.fired {
+                self.beat.nudge(now - r.kick.last_time, bpm);
+            } else if r.onset.fired && !kick_recent {
+                self.beat.nudge(now - r.onset.last_time, bpm);
+            }
+        }
+        if self.resync_pending {
+            self.resync_pending = false;
+            self.beat.resync_downbeat();
+        }
+
+        // 8. Structure (only once there is a tempo to count bars with).
+        let onset_fired = self.frame.rhythm.onset.fired;
+        self.structure.on_hop(
+            self.frame.loudness.energy_db,
+            self.named_energy[Band::Bass.index()],
+            &self.mel_energy,
+            onset_fired,
+            dt,
+        );
+        if new_beat {
+            self.frame.rhythm.beat.fire(now, 1.0);
+            if self.tempo.locked() {
+                let ev = self.structure.on_beat(self.beat.beat_in_bar(), now);
+                let s = &mut self.frame.structure;
+                if ev.build_started {
+                    s.build.fire(now, 1.0);
+                }
+                if let Some((time, ratio)) = ev.drop {
+                    s.drop.fire(time, ratio);
+                    // A drop marks the start of a phrase.
+                    self.beat.set_phrase_start(now - time, bpm);
+                }
+                if let Some(d) = ev.section_change {
+                    s.section_change.fire(now, d);
+                }
+            }
+        }
+        let s = &mut self.frame.structure;
+        s.building = self.structure.building;
+        s.build_amount = self.structure.build_amount;
+
+        let r = &mut self.frame.rhythm;
+        r.bpm = bpm;
+        r.tempo_confidence = self.tempo.confidence();
+        r.tempo_locked = self.tempo.locked();
+        r.tempo_manual = self.tempo.manual();
+        r.beat_phase = self.beat.beat_phase();
+        r.bar_phase = self.beat.bar_phase();
+        r.phrase_phase = self.beat.phrase_phase();
+        r.beat_in_bar = self.beat.beat_in_bar();
+        r.bar_in_phrase = self.beat.bar_in_phrase();
+        r.phrase_bars = self.beat.phrase_bars();
+        r.bar_count = self.beat.bars_elapsed();
     }
 }
 

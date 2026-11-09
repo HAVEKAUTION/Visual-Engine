@@ -22,6 +22,17 @@ pub const COLUMNS: usize = 1024;
 const PUBLISH_INTERVAL: Duration = Duration::from_millis(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(4);
 
+/// Manual controls sent from the UI to the analysis thread.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Command {
+    /// Tap tempo: a beat is happening now.
+    Tap,
+    /// The beat nearest to now is the downbeat (bar 1, beat 1).
+    ResyncDownbeat,
+    /// Leave tap-tempo mode and return to automatic tempo.
+    AutoTempo,
+}
+
 /// What the UI reads each frame.
 #[derive(Clone, Debug, Default)]
 pub struct WaveformSnapshot {
@@ -91,6 +102,7 @@ pub fn spawn(
     feeds: Receiver<FeedConsumer>,
     mut output: triple_buffer::Input<WaveformSnapshot>,
     mut signals: SignalPublisher,
+    commands: Receiver<Command>,
 ) -> JoinHandle<()> {
     std::thread::Builder::new()
         .name("analysis".into())
@@ -116,6 +128,15 @@ pub fn spawn(
                     }
                     Err(TryRecvError::Disconnected) => return, // app is closing
                     Err(TryRecvError::Empty) => {}
+                }
+
+                // Manual controls take effect at the next analysed hop.
+                while let Ok(cmd) = commands.try_recv() {
+                    match cmd {
+                        Command::Tap => analyzer.tap(),
+                        Command::ResyncDownbeat => analyzer.resync_downbeat(),
+                        Command::AutoTempo => analyzer.clear_manual_tempo(),
+                    }
                 }
 
                 if let Some(c) = consumer.as_mut() {
@@ -183,7 +204,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let (input, mut output) = triple_buffer::triple_buffer(&WaveformSnapshot::default());
         let (publisher, mut reader) = signals::bus();
-        let handle = spawn(rx, input, publisher);
+        let (_cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+        let handle = spawn(rx, input, publisher, cmd_rx);
 
         let (mut producer, consumer) = audio::feed::new_feed();
         tx.send(consumer).unwrap();

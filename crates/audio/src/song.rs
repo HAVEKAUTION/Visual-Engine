@@ -91,6 +91,23 @@ impl Song {
     }
 }
 
+/// The exact signal the analysis sees for a decoded file: every channel mixed
+/// to mono, then resampled to 48 kHz. Live playback and offline analysis both
+/// use this, so they give identical results.
+pub fn analysis_signal(decoded: &DecodedAudio) -> Vec<f32> {
+    let mono: Vec<f32> = decoded
+        .samples
+        .chunks_exact(decoded.channels.max(1))
+        .map(mix_to_mono)
+        .collect();
+    resample_offline(&mono, decoded.sample_rate, ANALYSIS_SAMPLE_RATE)
+}
+
+/// Decode a file straight to the analysis signal (for offline analysis).
+pub fn load_analysis_signal(path: &Path) -> Result<Vec<f32>> {
+    Ok(analysis_signal(&decode_file(path)?))
+}
+
 /// Average all channels of one frame.
 #[inline]
 pub fn mix_to_mono(frame: &[f32]) -> f32 {
@@ -145,6 +162,19 @@ mod tests {
         assert!((song.duration_secs() - 1.0).abs() < 1e-9);
         // Mono file plays equally on both sides.
         assert!((song.playback[2000] - song.playback[2001]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn offline_signal_matches_playback_analysis_signal() {
+        let decoded = DecodedAudio {
+            sample_rate: 44_100,
+            channels: 2,
+            samples: (0..20_000)
+                .map(|i| ((i * 7919) % 200) as f32 / 100.0 - 1.0)
+                .collect(),
+        };
+        let song = Song::from_decoded("t".into(), &decoded, 44_100);
+        assert_eq!(analysis_signal(&decoded), song.analysis);
     }
 
     #[test]

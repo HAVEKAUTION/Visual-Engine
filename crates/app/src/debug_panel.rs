@@ -92,7 +92,12 @@ fn pair(painter: &egui::Painter, rect: Rect, name: &str, s: &BandSignal, color: 
 }
 
 /// Draw the whole panel into the available space.
-pub fn show(ui: &mut egui::Ui, f: &SignalFrame, hops_per_sec: f32) {
+pub fn show(
+    ui: &mut egui::Ui,
+    f: &SignalFrame,
+    hops_per_sec: f32,
+    rhythm: &crate::rhythm_panel::RhythmView,
+) {
     let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
     let painter = ui.painter_at(rect);
     let r = rect.shrink2(Vec2::new(16.0, 10.0));
@@ -109,7 +114,17 @@ pub fn show(ui: &mut egui::Ui, f: &SignalFrame, hops_per_sec: f32) {
         TEXT_DIM,
     );
 
-    let body = Rect::from_min_max(r.left_top() + Vec2::new(0.0, 40.0), r.right_bottom());
+    // Rhythm row (onset lights, BPM, beat phase, counters, events).
+    let rhythm_rect = Rect::from_min_size(
+        r.left_top() + Vec2::new(0.0, 22.0),
+        Vec2::new(r.width(), 110.0),
+    );
+    crate::rhythm_panel::draw(&painter, rhythm_rect, f, rhythm);
+
+    let body = Rect::from_min_max(
+        r.left_top() + Vec2::new(0.0, 22.0 + 110.0 + 34.0),
+        r.right_bottom(),
+    );
     let col_gap = 28.0;
     let mel_w = body.width() * 0.38;
     let named_w = body.width() * 0.36;

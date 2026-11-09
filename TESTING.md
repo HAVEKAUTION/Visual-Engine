@@ -89,3 +89,52 @@ Each named band shows two bars: bright = **fast** (punchy), dim = **slow** (the 
 
 **Live input**
 - [ ] Start your mic: talking moves `mid`/`high_mid`; claps and hisses move `air`; silence → zero.
+
+## M1 part 2 – Rhythm and structure
+
+Use a song with a steady kick (house, techno, pop). The rhythm row is at the top of the
+meter panel; events are listed under **EVENTS** in the side panel.
+
+**Onset lights**
+- [ ] **KICK** flashes on every kick drum, **SNARE** on snares/claps, **HAT** on hi-hats,
+      **ONSET** on any hit. The numbers under them count up.
+- [ ] The lights stay dark during silence or when paused.
+
+**Tempo**
+- [ ] Within ~5 s of the music starting, the BPM turns white and settles on the song's
+      tempo (check against the BPM your DJ software or a website reports, ±1).
+- [ ] It doesn't jump to double or half (e.g. 64 or 256 for a 128 song).
+- [ ] Pause: the BPM stays where it was. Play again: it carries on.
+- [ ] The "confidence" number is high (0.6+) for steady dance music, lower for ambient music.
+
+**Beat clock**
+- [ ] The circle sweeps round once per beat and the white dot passes the top as each kick
+      hits. The circle lights up on every beat.
+- [ ] The four boxes step 1-2-3-4. Bar counter ("bar 3/8") and phrase bar move along.
+- [ ] **R**: press it on the "1" of a bar (the big downbeat). From then on beat 1 of the
+      boxes lines up with the start of each bar.
+- [ ] **T**: tap T along with the beat 4+ times. The BPM follows your tapping and shows
+      "TAPPED (manual)". "Auto tempo" (side panel) goes back to automatic.
+
+**Structure** (EDM / dance tracks with a build-up and drop work best)
+- [ ] During a build-up (riser, rolls getting faster, energy rising) the **build** bar fills
+      and says BUILDING; a "BUILD" line appears in EVENTS.
+- [ ] When the drop hits, a "DROP" line appears with the song time of the drop, and the
+      bar counter restarts at "bar 1/8".
+- [ ] A big change in sound (breakdown, new section) adds "SECTION CHANGE" lines. A steady
+      groove should not keep producing them.
+
+**Analyse file offline**
+- [ ] "📊 Analyse file offline…" → pick a song. A spinner shows, then "Saved <song>.analysis.csv"
+      and a summary (BPM, kick/snare/hat counts, builds, drops).
+- [ ] A 4-minute song takes a few seconds at most.
+- [ ] "Show in folder" opens the folder with the CSV selected.
+- [ ] Open the CSV in Excel / Numbers / Google Sheets. One row per ~10.7 ms. `kick`, `snare`,
+      `hat` columns hold the time of each hit; `events` holds e.g. `drop@93.751`. Jump to that
+      time in the song and check it's right.
+- [ ] Command line: `cargo run --release -- --analyse "path/to/song.mp3"` does the same.
+
+**Known quirks**
+- Very fast drum & bass (170+ BPM) reads as half time (e.g. 87). Tap T to fix it.
+- Snares with a lot of low body can also flash KICK (the kick band is 20–250 Hz).
+- Bar 1 is a guess until you press R or a drop is detected.

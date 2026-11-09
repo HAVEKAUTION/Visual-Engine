@@ -1,13 +1,15 @@
-//! Pure, deterministic DSP: spectrum, bands, auto-gain, smoothing, centroid
-//! and loudness (maths spec items 1–4 and 9). Same samples in, same signals
-//! out, live or offline.
-//!
-//! Onsets, tempo, beat phase and structure (items 5–8) arrive in M1 part 2.
+//! Pure, deterministic DSP (maths spec items 1–9): spectrum, bands, auto-gain,
+//! smoothing, onsets, tempo, beat clock, structure, centroid and loudness.
+//! Same samples in, same signals out, live or offline.
 
 pub mod analyzer;
 pub mod bands;
+pub mod beat;
 pub mod config;
+pub mod onset;
 pub mod smoothing;
+pub mod structure;
+pub mod tempo;
 
 pub use analyzer::Analyzer;
 pub use config::AnalysisConfig;
