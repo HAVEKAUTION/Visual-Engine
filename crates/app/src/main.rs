@@ -9,6 +9,7 @@ mod offline;
 mod perform;
 mod rhythm_panel;
 mod scene_view;
+mod theme;
 mod ui;
 
 fn main() -> eframe::Result {

@@ -8,14 +8,220 @@
 //! - Bypassed nodes pass their first picture input straight through.
 //! - Given the same graph, signals and time steps, the output is the same.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use graph::{Graph, Node, NodeId, Param, ParamValue};
 use render::{Renderer, ScenePipeline, Show};
 use scenes::{CompiledScene, ParamState, SceneLibrary, SignalState};
-use signals::modulation::{ModContext, Modulator, Wave};
+use signals::modulation::{ModContext, Modulator, Wave, random_walk};
 
-use crate::registry::{self, AUDIO_SIGNAL, LFO, PROGRAM_OUT};
+use crate::registry::{self, *};
+
+/// Is this a CPU node (signal or trigger) rather than a picture node?
+pub fn is_signal_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        AUDIO_SIGNAL
+            | LFO
+            | AUDIO_TRIGGER
+            | BEAT_TRIGGER
+            | GATE
+            | MATH
+            | REMAP
+            | SMOOTH
+            | ENVELOPE
+            | COUNTER
+            | SAMPLE_HOLD
+            | RANDOM
+    )
+}
+
+/// Memory a signal node keeps between frames.
+#[derive(Clone, Debug, Default)]
+struct SigState {
+    started: bool,
+    prev: f32,
+    level: f32,
+    rising: bool,
+    count: u32,
+    since: f32,
+}
+
+/// What a signal node can read this frame.
+struct SigIn<'a> {
+    dt: f32,
+    beats: f64,
+    signals: &'a SignalState,
+    num: &'a dyn Fn(&str, f32) -> f32,
+    flag: &'a dyn Fn(&str, bool) -> bool,
+    choice: &'a dyn Fn(&str) -> u32,
+    /// Value plugged into an input (`None` = unplugged).
+    input: &'a dyn Fn(&str) -> Option<f32>,
+}
+
+/// One frame of a signal / trigger node. Triggers output 1 on the frame they
+/// fire and 0 otherwise.
+fn signal_node(kind: &str, st: &mut SigState, i: &SigIn) -> f32 {
+    let dt = i.dt.clamp(0.0, 0.25);
+    let fired = |x: Option<f32>| x.unwrap_or(0.0) > 0.5;
+    let first = !st.started;
+    st.started = true;
+    match kind {
+        AUDIO_SIGNAL => scenes::uniforms::SIGNAL_NAMES
+            .get((i.choice)("signal") as usize)
+            .and_then(|n| i.signals.get(n))
+            .unwrap_or(0.0),
+        LFO => {
+            let per = (i.num)("beats", 4.0).max(1e-3) as f64;
+            let wave = Wave::ALL
+                .get((i.choice)("wave") as usize)
+                .copied()
+                .unwrap_or(Wave::Sine);
+            wave.at(i.beats / per + (i.num)("offset", 0.0) as f64)
+        }
+        AUDIO_TRIGGER => {
+            let event = TRIGGER_EVENTS
+                .get((i.choice)("event") as usize)
+                .map(|e| e.0)
+                .unwrap_or("kick");
+            let (x, hit) = match event {
+                "beat" => {
+                    let x = i.signals.get("beat_count").unwrap_or(0.0);
+                    (x, x > st.prev)
+                }
+                "bar" => {
+                    let x = i.signals.get("bar_phase").unwrap_or(0.0);
+                    (x, x < st.prev - 0.5)
+                }
+                e => {
+                    let x = i.signals.get(&format!("{e}_age")).unwrap_or(1e9);
+                    (x, x + 1e-4 < st.prev)
+                }
+            };
+            st.prev = x;
+            if hit && !first { 1.0 } else { 0.0 }
+        }
+        BEAT_TRIGGER => {
+            let every = (i.num)("every", 1.0).max(0.01) as f64;
+            let x = ((i.beats - (i.num)("offset", 0.0) as f64) / every).floor() as f32;
+            let hit = x > st.prev;
+            st.prev = x;
+            if hit && !first { 1.0 } else { 0.0 }
+        }
+        GATE => {
+            let x = (i.input)("in").unwrap_or(0.0);
+            let thr = (i.num)("threshold", 1.5);
+            st.since += dt;
+            let hit = !first && x >= thr && st.prev < thr && st.since >= (i.num)("gap", 0.1);
+            st.prev = x;
+            if hit {
+                st.since = 0.0;
+                1.0
+            } else {
+                0.0
+            }
+        }
+        MATH => {
+            let a = (i.input)("a").unwrap_or_else(|| (i.num)("a_value", 0.0));
+            let b = (i.input)("b").unwrap_or_else(|| (i.num)("b_value", 1.0));
+            match MATH_OPS
+                .get((i.choice)("op") as usize)
+                .copied()
+                .unwrap_or("Add")
+            {
+                "Subtract" => a - b,
+                "Multiply" => a * b,
+                "Min" => a.min(b),
+                "Max" => a.max(b),
+                "Mix" => a + (b - a) * (i.num)("mix", 0.5),
+                "Difference" => (a - b).abs(),
+                _ => a + b,
+            }
+        }
+        REMAP => {
+            let x = (i.input)("in").unwrap_or(0.0);
+            let (lo, hi) = ((i.num)("in_min", 0.0), (i.num)("in_max", 1.0));
+            let mut t = if (hi - lo).abs() < 1e-6 {
+                0.0
+            } else {
+                (x - lo) / (hi - lo)
+            };
+            if (i.flag)("clamp", true) {
+                t = t.clamp(0.0, 1.0);
+            }
+            let t = t.signum() * t.abs().powf((i.num)("curve", 1.0).max(0.01));
+            let (a, b) = ((i.num)("out_min", 0.0), (i.num)("out_max", 1.0));
+            a + t * (b - a)
+        }
+        SMOOTH => {
+            let x = (i.input)("in").unwrap_or(0.0);
+            if first {
+                st.level = x;
+            }
+            let tau = if x > st.level {
+                (i.num)("attack", 0.05)
+            } else {
+                (i.num)("release", 0.6)
+            };
+            let alpha = if tau <= 0.0 {
+                1.0
+            } else {
+                1.0 - (-dt / tau).exp()
+            };
+            st.level += alpha * (x - st.level);
+            st.level
+        }
+        ENVELOPE => {
+            let attack = (i.num)("attack", 0.01);
+            let hit = fired((i.input)("trigger"));
+            if hit && attack <= 0.0 {
+                // Instant punch: full on the frame it fires.
+                st.level = 1.0;
+                st.rising = false;
+                return st.level;
+            }
+            if hit {
+                st.rising = true;
+            }
+            if st.rising {
+                st.level += dt / attack.max(1e-4);
+                if st.level >= 1.0 {
+                    st.level = 1.0;
+                    st.rising = false;
+                }
+            } else {
+                st.level *= (-dt / (i.num)("decay", 0.35).max(1e-3)).exp();
+            }
+            st.level
+        }
+        COUNTER => {
+            if fired((i.input)("reset")) {
+                st.count = 0;
+            }
+            if fired((i.input)("count")) {
+                st.count = st.count.wrapping_add(1);
+            }
+            let n = (i.num)("steps", 4.0).round().max(2.0) as u32;
+            (st.count % n) as f32 / (n - 1) as f32
+        }
+        SAMPLE_HOLD => {
+            if first || fired((i.input)("trigger")) {
+                st.level = (i.input)("in").unwrap_or(0.0);
+            }
+            st.level
+        }
+        RANDOM => {
+            let x = i.beats * (i.num)("rate", 0.5).max(0.0) as f64;
+            let seed = (i.num)("seed", 1.0).round() as u32;
+            if (i.flag)("smooth", true) {
+                random_walk(x, seed)
+            } else {
+                random_walk(x.floor(), seed)
+            }
+        }
+        _ => 0.0,
+    }
+}
 
 /// What the evaluator needs from the outside each frame.
 pub struct FrameInput<'a> {
@@ -101,6 +307,8 @@ pub struct Evaluator {
     pictures: HashMap<NodeId, Option<u64>>,
     /// Number parameters after modulation, last frame.
     live: HashMap<(NodeId, String), f32>,
+    /// Memory of signal nodes (envelopes, counters...).
+    sig: HashMap<NodeId, SigState>,
     /// Problems by node, shown as badges.
     pub errors: BTreeMap<NodeId, String>,
 }
@@ -114,6 +322,7 @@ impl Evaluator {
             values: HashMap::new(),
             pictures: HashMap::new(),
             live: HashMap::new(),
+            sig: HashMap::new(),
             errors: BTreeMap::new(),
         }
     }
@@ -206,7 +415,9 @@ impl Evaluator {
     }
 
     /// Evaluate everything the `targets` need (the Program Out node, plus any
-    /// node being looked at) and return the picture of the first one. Call
+    /// node being looked at) and return the picture of the first one.
+    /// `previews` are extra nodes (e.g. ones not wired to anything yet) run
+    /// at a quarter of the size, for their thumbnails. Call
     /// [`Renderer::begin_frame`] before and [`Renderer::end_frame`] after
     /// (once for all evaluators).
     pub fn run(
@@ -216,19 +427,23 @@ impl Evaluator {
         renderer: &mut Renderer,
         input: FrameInput,
         targets: &[NodeId],
+        previews: &[NodeId],
     ) -> Show {
         self.errors.clear();
         self.values.clear();
         self.live.clear();
         // Forget nodes that were deleted.
         self.rt.retain(|id, _| graph.node(*id).is_some());
+        self.sig.retain(|id, _| graph.node(*id).is_some());
+        let main: BTreeSet<NodeId> = graph.plan(targets).into_iter().collect();
+        let all: Vec<NodeId> = targets.iter().chain(previews).copied().collect();
 
         let beats = input.signals.get("beats").unwrap_or(0.0) as f64;
         let time = input.signals.get("time").unwrap_or(0.0) as f64;
         // Which picture each node puts out this frame (`None` = black).
         let mut image: HashMap<NodeId, Option<u64>> = HashMap::new();
 
-        for id in graph.plan(targets) {
+        for id in graph.plan(&all) {
             let Some(node) = graph.node(id) else { continue };
             let first_input = |image: &HashMap<NodeId, Option<u64>>| {
                 node.inputs
@@ -249,29 +464,53 @@ impl Evaluator {
                 |p: &Param| effective_value(graph, id, p, &ctx, &self.values, input.intensity);
 
             match node.kind.as_str() {
-                AUDIO_SIGNAL => {
-                    let name = match node.param("signal").map(|p| &p.value) {
-                        Some(ParamValue::Choice(i)) => {
-                            scenes::uniforms::SIGNAL_NAMES.get(*i as usize).copied()
-                        }
-                        _ => None,
-                    };
-                    let v = name.and_then(|n| sig.get(n)).unwrap_or(0.0);
-                    self.values.insert(id, v);
-                }
-                LFO => {
-                    let per = node.param("beats").map(eff).unwrap_or(4.0).max(1e-3);
-                    let wave = match node.param("wave").map(|p| &p.value) {
-                        Some(ParamValue::Choice(i)) => {
-                            Wave::ALL.get(*i as usize).copied().unwrap_or(Wave::Sine)
-                        }
-                        _ => Wave::Sine,
+                k if is_signal_kind(k) => {
+                    let values = &self.values;
+                    let input_of = |port: &str| {
+                        graph
+                            .input_link(id, port)
+                            .and_then(|l| values.get(&l.from.node).copied())
                     };
                     let v = if node.bypass {
-                        0.0
+                        // Processors pass their first input through; sources go quiet.
+                        node.inputs
+                            .iter()
+                            .find_map(|p| input_of(&p.name))
+                            .filter(|_| {
+                                node.outputs
+                                    .first()
+                                    .is_some_and(|o| o.ty == graph::PortType::Signal)
+                            })
+                            .unwrap_or(0.0)
                     } else {
-                        wave.at(beats / per as f64)
+                        let num = |name: &str, d: f32| node.param(name).map(eff).unwrap_or(d);
+                        let flag = |name: &str, d: bool| match node.param(name).map(|p| &p.value) {
+                            Some(ParamValue::Bool(b)) => *b,
+                            _ => d,
+                        };
+                        let choice = |name: &str| match node.param(name).map(|p| &p.value) {
+                            Some(ParamValue::Choice(c)) => *c,
+                            _ => 0,
+                        };
+                        for p in node.params.iter().filter(|p| p.def.is_modulatable()) {
+                            self.live.insert((id, p.def.name.clone()), eff(p));
+                        }
+                        let st = self.sig.entry(id).or_default();
+                        signal_node(
+                            k,
+                            st,
+                            &SigIn {
+                                dt: input.dt,
+                                beats,
+                                signals: sig,
+                                num: &num,
+                                flag: &flag,
+                                choice: &choice,
+                                input: &input_of,
+                            },
+                        )
                     };
+                    let v = if v.is_finite() { v } else { 0.0 };
                     self.values.insert(id, v);
                 }
                 PROGRAM_OUT => {
@@ -335,7 +574,10 @@ impl Evaluator {
                             .and_then(|img| graph.input_link(id, &img.name))
                             .and_then(|l| image.get(&l.from.node).copied().flatten())
                     });
-                    let size = graph::node_size(node.resolution, input.output_size, input.proxy);
+                    // Nodes only shown as thumbnails render at a quarter size.
+                    let scale = if main.contains(&id) { 1.0 } else { 0.25 };
+                    let size =
+                        graph::node_size(node.resolution, input.output_size, input.proxy * scale);
                     match &rt.pipeline {
                         Some(p) => {
                             renderer.render_node(
@@ -421,5 +663,153 @@ mod tests {
         // Clamped to the range.
         vals.insert(s, 100.0);
         assert_eq!(effective_value(&g, t, &p, &ctx, &vals, 1.0), 10.0);
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+
+    /// Run `kind` for `frames` frames of `dt`, feeding `inputs(frame)`.
+    fn run(
+        kind: &str,
+        params: &[(&str, f32)],
+        frames: usize,
+        dt: f32,
+        inputs: &dyn Fn(usize, &str) -> Option<f32>,
+    ) -> Vec<f32> {
+        let sig = SignalState::new();
+        let mut st = SigState::default();
+        (0..frames)
+            .map(|f| {
+                let num = |n: &str, d: f32| {
+                    params
+                        .iter()
+                        .find(|(k, _)| *k == n)
+                        .map(|(_, v)| *v)
+                        .unwrap_or(d)
+                };
+                let input = |p: &str| inputs(f, p);
+                signal_node(
+                    kind,
+                    &mut st,
+                    &SigIn {
+                        dt,
+                        beats: f as f64 * 0.25,
+                        signals: &sig,
+                        num: &num,
+                        flag: &|_, d| d,
+                        choice: &|_| 0,
+                        input: &input,
+                    },
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn envelope_punches_and_fades_by_time() {
+        let trig = |f: usize, p: &str| (p == "trigger").then_some(if f == 1 { 1.0 } else { 0.0 });
+        let v = run(
+            ENVELOPE,
+            &[("attack", 0.0), ("decay", 0.5)],
+            40,
+            0.01,
+            &trig,
+        );
+        assert_eq!(v[0], 0.0);
+        assert_eq!(v[1], 1.0);
+        // After 0.5 s it is down to 1/e, whatever the frame rate.
+        assert!((v[39] - (-0.38f32 / 0.5).exp()).abs() < 1e-3);
+        let fast = run(
+            ENVELOPE,
+            &[("attack", 0.0), ("decay", 0.5)],
+            21,
+            0.02,
+            &trig,
+        );
+        assert!((fast[20] - v[39]).abs() < 0.03);
+    }
+
+    #[test]
+    fn counter_steps_and_resets() {
+        let inputs = |f: usize, p: &str| match p {
+            "count" => Some(1.0),
+            "reset" => Some(if f == 6 { 1.0 } else { 0.0 }),
+            _ => None,
+        };
+        let v = run(COUNTER, &[("steps", 3.0)], 8, 0.01, &inputs);
+        assert_eq!(&v[..6], &[0.5, 1.0, 0.0, 0.5, 1.0, 0.0]);
+        assert_eq!(v[6], 0.5); // reset, then counted this frame's trigger
+    }
+
+    #[test]
+    fn gate_fires_once_per_crossing() {
+        let wave = |f: usize, _: &str| Some(if (f / 5) % 2 == 1 { 3.0 } else { 0.0 });
+        let v = run(GATE, &[("threshold", 1.5), ("gap", 0.0)], 20, 0.01, &wave);
+        let fires: Vec<usize> = (0..20).filter(|i| v[*i] > 0.5).collect();
+        assert_eq!(fires, vec![5, 15]);
+    }
+
+    #[test]
+    fn remap_math_smooth_beat_trigger() {
+        let x = |_: usize, _: &str| Some(1.5);
+        let v = run(
+            REMAP,
+            &[
+                ("in_min", 1.0),
+                ("in_max", 2.0),
+                ("out_min", 10.0),
+                ("out_max", 20.0),
+            ],
+            1,
+            0.01,
+            &x,
+        );
+        assert!((v[0] - 15.0).abs() < 1e-4);
+        let v = run(MATH, &[], 1, 0.01, &x);
+        assert_eq!(v[0], 3.0); // Add, both plugged with 1.5
+        // Smooth: starts at the input, then follows with the rise time.
+        let step = |f: usize, _: &str| Some(if f == 0 { 0.0 } else { 1.0 });
+        let v = run(SMOOTH, &[("attack", 0.1)], 11, 0.01, &step);
+        assert!((v[10] - (1.0 - (-1.0f32).exp())).abs() < 0.01);
+        // Beat trigger every beat: beats advance 0.25 per frame here.
+        let none = |_: usize, _: &str| None;
+        let v = run(BEAT_TRIGGER, &[("every", 1.0)], 9, 0.01, &none);
+        let fires: Vec<usize> = (0..9).filter(|i| v[*i] > 0.5).collect();
+        assert_eq!(fires, vec![4, 8]);
+    }
+
+    #[test]
+    fn audio_trigger_fires_on_kicks() {
+        let mut sig = SignalState::new();
+        let mut f = signals::SignalFrame::default();
+        let mut st = SigState::default();
+        let mut fires = vec![];
+        for frame in 0..30 {
+            f.hop_index += 1;
+            f.time = frame as f64 * 0.02;
+            if frame % 10 == 5 {
+                f.rhythm.kick.fire(f.time, 1.0);
+            }
+            sig.update(&f, 0.02, [64.0, 64.0]);
+            let v = signal_node(
+                AUDIO_TRIGGER,
+                &mut st,
+                &SigIn {
+                    dt: 0.02,
+                    beats: 0.0,
+                    signals: &sig,
+                    num: &|_, d| d,
+                    flag: &|_, d| d,
+                    choice: &|_| 0, // kick
+                    input: &|_| None,
+                },
+            );
+            if v > 0.5 {
+                fires.push(frame);
+            }
+        }
+        assert_eq!(fires, vec![5, 15, 25]);
     }
 }

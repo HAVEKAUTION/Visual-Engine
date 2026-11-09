@@ -22,8 +22,11 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **v2 M2 – graph engine**: in progress. Part 1: the graph data model
   (`crates/graph`). Part 2: GPU evaluation (`crates/nodes`) with a temporary test graph
   in the app.
-- **v2 M3 – workspace + node editor**: in progress. Part 1 done: the node editor
+- **v2 M3 – workspace + node editor**: in progress. Part 1: the node editor
   (right-click add, wiring, Inspector with modulation, copy/paste, undo, autosave).
+  Part 2: the one-screen workspace (toolbar, signal strip, theme), viewer
+  Program/Selected/Wipe/PiP, live thumbnails, ten signal/trigger nodes, frames, snap,
+  colour tags, S/P/L insert. Next: groups with macro knobs, GPU cost per node.
 
 ## Running it
 

@@ -567,6 +567,55 @@ fn broken_files_are_reported_not_loaded() {
     let _ = o;
 }
 
+#[test]
+fn frames_and_colours_undo_and_save() {
+    let mut g = Graph::new();
+    let mut h = History::new();
+    let [a, ..] = sample(&mut g, &mut h);
+    let mut h = History::new();
+    let before = g.clone();
+    let id = g.new_frame_id();
+    let f = Frame {
+        id,
+        label: "Drums".into(),
+        rect: [0.0, 0.0, 300.0, 200.0],
+        colour: [200, 80, 60],
+    };
+    h.exec(&mut g, Command::PutFrame(f.clone())).unwrap();
+    h.exec(
+        &mut g,
+        Command::SetColour {
+            node: a,
+            colour: Some([10, 200, 90]),
+        },
+    )
+    .unwrap();
+    h.exec(
+        &mut g,
+        Command::PutFrame(Frame {
+            label: "Kick stuff".into(),
+            ..f.clone()
+        }),
+    )
+    .unwrap();
+    assert_eq!(g.frame(id).unwrap().label, "Kick stuff");
+    assert_eq!(g.node(a).unwrap().colour, Some([10, 200, 90]));
+    // Save / load keeps them; numbering continues.
+    let mut loaded = Graph::from_ron(&g.to_ron()).unwrap();
+    assert_eq!(loaded, g);
+    assert!(loaded.new_frame_id() > id);
+    h.exec(&mut g, Command::RemoveFrame(id)).unwrap();
+    assert!(g.frames().is_empty());
+    while h.undo(&mut g).unwrap() {}
+    assert_eq!(g.nodes(), before.nodes());
+    assert!(g.frames().is_empty());
+    assert!(h.redo(&mut g).unwrap());
+    assert_eq!(g.frame(id).unwrap().label, "Drums");
+    // Older files without frames still load.
+    let old = before.to_ron().replace("frames: [],", "");
+    assert!(Graph::from_ron(&old).is_ok());
+}
+
 impl Graph {
     fn links_mut_for_test(&mut self) -> &mut Vec<Link> {
         self.links_mut()

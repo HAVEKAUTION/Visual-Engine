@@ -2,6 +2,29 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M3 part 2: workspace, depth, tidy graphs
+- New one-screen workspace: toolbar (panel toggles, viewer mode, snap, thumbnails,
+  undo/redo, fps, ?), Media | Looks tabs on the left, Inspector on the right, the graph
+  below and a signal strip along the bottom (bands, K/S/H lights, BPM, beat dots, bar
+  and phrase). New dark theme with one warm accent. Layout and toggles are remembered.
+- Viewer: shows the Program (final output) by default; the selected node appears as a
+  picture-in-picture (click it to view it full size). V toggles Program/Selected, W
+  toggles a draggable wipe that compares the selected node with the Program.
+- Live thumbnails inside every picture node (nodes not wired to the output render at
+  quarter size just for their thumbnail).
+- Ten new signal/trigger nodes: Math, Remap, Smooth, Envelope, Counter, Sample & Hold,
+  Random, Audio Trigger (kick/snare/hat/hit/beat/bar/build/drop/section), Beat Trigger,
+  Gate. LFO gained a phase offset. Orange trigger wires and lights flash when they fire.
+- Tidy graphs: snap to grid (G), Frames (coloured backdrops with a title; drag the
+  title to move everything inside, drag the corner to resize, double-click to rename),
+  colour tags for nodes (right-click → Colour). Colour-coded categories in the menus.
+- Quicker building: S inserts an effect after the selected node, P adds a parallel
+  branch (auto 50/50 Merge), L adds a layer on top (auto Merge). Drop a wire on empty
+  space to add a node already wired to it. Search also matches descriptions. Hover a
+  node or plug for help; ? shows every shortcut.
+- The starter graph now uses Remap (bass → zoom stays sensible) and a Frame.
+- Graph files gain frames and node colours (older files still load).
+
 ## 2026-11-10 — v2 M3 part 1: the node editor
 - The node graph is now the main view: a Resolve-style editor across the bottom of the
   window (Tab hides/shows it). The old one-scene panel is still there as "Classic

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use signals::modulation::ModSlot;
 
 use crate::model::{
-    Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, Resolution, WireMod,
+    Endpoint, Frame, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, Resolution,
+    WireMod,
 };
 use crate::types::ParamValue;
 
@@ -52,6 +53,14 @@ pub enum Command {
         node: NodeId,
         resolution: Resolution,
     },
+    /// Tag a node with a colour (`None` = its type's colour).
+    SetColour {
+        node: NodeId,
+        colour: Option<[u8; 3]>,
+    },
+    /// Add a frame (backdrop), or replace the one with the same id.
+    PutFrame(Frame),
+    RemoveFrame(u32),
     /// Add a group, or replace the group with the same id (members,
     /// published controls, label).
     PutGroup(Group),
@@ -191,6 +200,20 @@ impl Graph {
                     node,
                     resolution: old,
                 }
+            }
+            Command::SetColour { node, colour } => {
+                let old = std::mem::replace(&mut self.node_mut(node)?.colour, colour);
+                Command::SetColour { node, colour: old }
+            }
+            Command::PutFrame(f) => {
+                let id = f.id;
+                match self.put_frame_raw(f) {
+                    Some(old) => Command::PutFrame(old),
+                    None => Command::RemoveFrame(id),
+                }
+            }
+            Command::RemoveFrame(id) => {
+                Command::PutFrame(self.take_frame(id).ok_or(GraphError::NoSuchFrame(id))?)
             }
             Command::PutGroup(group) => {
                 self.check_group(&group)?;

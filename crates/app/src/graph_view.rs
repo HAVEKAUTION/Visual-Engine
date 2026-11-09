@@ -2,6 +2,7 @@
 //! editor, the Inspector, and autosave (every 30 s and on exit; restored on
 //! the next launch, so a crash loses at most 30 s of work).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -58,6 +59,17 @@ pub fn default_wire(g: &Graph, from: &OutputRef) -> graph::WireMod {
     }
 }
 
+/// What the big viewer shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ViewerMode {
+    /// The final output (what the audience sees).
+    Program,
+    /// The selected node's picture.
+    Selected,
+    /// Split screen: selected node on the left, program on the right.
+    Wipe,
+}
+
 pub struct Workspace {
     pub graph: Graph,
     pub history: History,
@@ -69,6 +81,13 @@ pub struct Workspace {
     path: Option<PathBuf>,
     /// One-off message for the user (e.g. "graph restored").
     pub notice: Option<String>,
+    pub viewer: ViewerMode,
+    /// Small picture-in-picture of the selected node over the program.
+    pub pip: bool,
+    /// Wipe line position, 0..1 across the viewer.
+    pub wipe: f32,
+    /// Live picture of each node (egui textures), for thumbnails, PiP and wipe.
+    pub thumbs: HashMap<NodeId, egui::TextureId>,
 }
 
 impl Workspace {
@@ -103,6 +122,10 @@ impl Workspace {
             last_save: Instant::now(),
             path,
             notice,
+            viewer: ViewerMode::Program,
+            pip: true,
+            wipe: 0.5,
+            thumbs: HashMap::new(),
         }
     }
 
@@ -115,38 +138,62 @@ impl Workspace {
             .map(|n| n.id)
     }
 
-    /// The node shown in the viewer: the selected picture node, else the
-    /// program.
-    pub fn viewed(&self) -> Option<NodeId> {
-        if self.editor.selected.len() == 1 {
-            let id = *self.editor.selected.first()?;
-            let n = self.graph.node(id)?;
-            if n.makes_image() {
-                return Some(id);
-            }
+    /// The selected picture node (if exactly one, and it isn't the output).
+    pub fn selected_picture(&self) -> Option<NodeId> {
+        if self.editor.selected.len() != 1 {
+            return None;
         }
-        self.program()
+        let id = *self.editor.selected.first()?;
+        let n = self.graph.node(id)?;
+        (n.makes_image() && Some(id) != self.program()).then_some(id)
     }
 
-    /// The nodes to evaluate this frame (program first).
+    /// The node the big viewer shows.
+    pub fn viewed(&self) -> Option<NodeId> {
+        match self.viewer {
+            ViewerMode::Program | ViewerMode::Wipe => self.program(),
+            ViewerMode::Selected => self.selected_picture().or_else(|| self.program()),
+        }
+    }
+
+    /// The nodes to evaluate at full size this frame (program first).
     pub fn targets(&self) -> Vec<NodeId> {
         let mut t: Vec<NodeId> = self.program().into_iter().collect();
-        if let Some(v) = self.viewed()
-            && !t.contains(&v)
-        {
+        if let Some(v) = self.selected_picture() {
             t.push(v);
         }
         t
     }
 
+    /// Extra nodes to run for their thumbnails and readouts: every signal
+    /// node always (cheap), every picture node when thumbnails are on.
+    pub fn previews(&self, thumbnails: bool) -> Vec<NodeId> {
+        self.graph
+            .nodes()
+            .iter()
+            .filter(|n| thumbnails || !n.makes_image())
+            .map(|n| n.id)
+            .collect()
+    }
+
     /// Caption for the viewer when it isn't showing the program.
     pub fn viewer_caption(&self) -> Option<String> {
-        let v = self.viewed()?;
-        if Some(v) == self.program() {
-            return None;
+        let label = |id: NodeId| {
+            self.graph
+                .node(id)
+                .map(|n| format!("{:02} {}", id.0, n.label))
+        };
+        match self.viewer {
+            ViewerMode::Selected => self
+                .selected_picture()
+                .and_then(label)
+                .map(|l| format!("Viewing {l}")),
+            ViewerMode::Wipe => Some(match self.selected_picture().and_then(label) {
+                Some(l) => format!("◀ {l}   |   Program ▶"),
+                None => "Wipe: select a node to compare it with the program".into(),
+            }),
+            ViewerMode::Program => None,
         }
-        let n = self.graph.node(v)?;
-        Some(format!("Viewing {:02} {}", v.0, n.label))
     }
 
     /// A scene/effect file changed on disk.
@@ -184,7 +231,7 @@ impl Workspace {
         if !ui.input(|i| i.pointer.any_down()) {
             self.history.seal();
         }
-        let viewed = self.viewed();
+        let viewed = self.selected_picture().or_else(|| self.viewed());
         self.editor.show(
             ui,
             graph_editor::Ctx {
@@ -194,6 +241,7 @@ impl Workspace {
                 catalogue: &self.catalogue,
                 library,
                 viewed,
+                thumbs: &self.thumbs,
             },
         );
     }

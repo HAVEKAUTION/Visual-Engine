@@ -18,11 +18,45 @@ pub const SHADER_PREFIX: &str = "shader:";
 pub const AUDIO_SIGNAL: &str = "audio_signal";
 pub const LFO: &str = "lfo";
 pub const PROGRAM_OUT: &str = "program_out";
+pub const AUDIO_TRIGGER: &str = "audio_trigger";
+pub const BEAT_TRIGGER: &str = "beat_trigger";
+pub const GATE: &str = "gate";
+pub const MATH: &str = "math";
+pub const REMAP: &str = "remap";
+pub const SMOOTH: &str = "smooth";
+pub const ENVELOPE: &str = "envelope";
+pub const COUNTER: &str = "counter";
+pub const SAMPLE_HOLD: &str = "sample_hold";
+pub const RANDOM: &str = "random";
+
+/// Events the Audio Trigger node can fire on: (key, label).
+pub const TRIGGER_EVENTS: &[(&str, &str)] = &[
+    ("kick", "Kick"),
+    ("snare", "Snare"),
+    ("hat", "Hi-hat"),
+    ("onset", "Any hit"),
+    ("beat", "Every beat"),
+    ("bar", "Every bar"),
+    ("build", "Build-up starts"),
+    ("drop", "Drop"),
+    ("section", "Section change"),
+];
+
+pub const MATH_OPS: &[&str] = &[
+    "Add",
+    "Subtract",
+    "Multiply",
+    "Min",
+    "Max",
+    "Mix",
+    "Difference",
+];
 
 /// Name of the picture output of shader nodes and of the value output of
 /// signal nodes.
 pub const IMAGE_OUT: &str = "out";
 pub const VALUE_OUT: &str = "value";
+pub const TRIGGER_OUT: &str = "fire";
 
 pub fn shader_kind(file: &str) -> String {
     format!("{SHADER_PREFIX}{file}")
@@ -78,7 +112,131 @@ pub fn shader_spec(file: &str, meta: &SceneMeta) -> NodeSpec {
 /// Specs of the built-in (non-shader) nodes.
 pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
     let value_out = || vec![PortDef::new(VALUE_OUT, PortType::Signal)];
+    let fire_out = || vec![PortDef::new(TRIGGER_OUT, PortType::Trigger)];
+    let sig_in = |name: &str, label: &str| PortDef {
+        label: label.into(),
+        ..PortDef::new(name, PortType::Signal).optional()
+    };
+    let trig_in = |name: &str, label: &str| PortDef {
+        label: label.into(),
+        ..PortDef::new(name, PortType::Trigger).optional()
+    };
+    let num = |name: &str, label: &str, min: f32, max: f32, default: f32| ParamDef {
+        label: label.into(),
+        ..ParamDef::float(name, min, max, default)
+    };
+    let pick = |name: &str, label: &str, options: &[&str], default: u32| ParamDef {
+        label: label.into(),
+        ..ParamDef::choice(name, options, default)
+    };
+    let toggle = |name: &str, label: &str, on: bool| ParamDef {
+        label: label.into(),
+        default: ParamValue::Bool(on),
+        min: 0.0,
+        max: 0.0,
+        ..ParamDef::float(name, 0.0, 0.0, 0.0)
+    };
+    let spec = |label: &str, inputs: Vec<PortDef>, outputs: Vec<PortDef>, params| NodeSpec {
+        kind: kind.into(),
+        label: label.into(),
+        inputs,
+        outputs,
+        params,
+    };
     Some(match kind {
+        AUDIO_TRIGGER => spec(
+            "Audio Trigger",
+            vec![],
+            fire_out(),
+            vec![pick(
+                "event",
+                "Fires on",
+                &TRIGGER_EVENTS.iter().map(|e| e.0).collect::<Vec<_>>(),
+                0,
+            )],
+        ),
+        BEAT_TRIGGER => spec(
+            "Beat Trigger",
+            vec![],
+            fire_out(),
+            vec![
+                num("every", "Every (beats)", 0.25, 64.0, 1.0),
+                num("offset", "Offset (beats)", 0.0, 16.0, 0.0),
+            ],
+        ),
+        GATE => spec(
+            "Gate",
+            vec![sig_in("in", "In")],
+            fire_out(),
+            vec![
+                num("threshold", "Threshold", -4.0, 8.0, 1.5),
+                num("gap", "Min gap (s)", 0.0, 4.0, 0.1),
+            ],
+        ),
+        MATH => spec(
+            "Math",
+            vec![sig_in("a", "A"), sig_in("b", "B")],
+            value_out(),
+            vec![
+                pick("op", "Operation", MATH_OPS, 0),
+                num("a_value", "A (if unplugged)", -10.0, 10.0, 0.0),
+                num("b_value", "B (if unplugged)", -10.0, 10.0, 1.0),
+                num("mix", "Mix amount", 0.0, 1.0, 0.5),
+            ],
+        ),
+        REMAP => spec(
+            "Remap",
+            vec![sig_in("in", "In")],
+            value_out(),
+            vec![
+                num("in_min", "From min", -10.0, 10.0, 0.0),
+                num("in_max", "From max", -10.0, 10.0, 2.0),
+                num("out_min", "To min", -10.0, 10.0, 0.0),
+                num("out_max", "To max", -10.0, 10.0, 1.0),
+                num("curve", "Curve", 0.2, 5.0, 1.0),
+                toggle("clamp", "Clamp", true),
+            ],
+        ),
+        SMOOTH => spec(
+            "Smooth",
+            vec![sig_in("in", "In")],
+            value_out(),
+            vec![
+                num("attack", "Rise time (s)", 0.0, 5.0, 0.05),
+                num("release", "Fall time (s)", 0.0, 10.0, 0.6),
+            ],
+        ),
+        ENVELOPE => spec(
+            "Envelope",
+            vec![trig_in("trigger", "Trigger")],
+            value_out(),
+            vec![
+                num("attack", "Attack (s)", 0.0, 2.0, 0.01),
+                num("decay", "Decay (s)", 0.02, 8.0, 0.35),
+            ],
+        ),
+        COUNTER => spec(
+            "Counter",
+            vec![trig_in("count", "Count"), trig_in("reset", "Reset")],
+            value_out(),
+            vec![num("steps", "Steps", 2.0, 64.0, 4.0)],
+        ),
+        SAMPLE_HOLD => spec(
+            "Sample & Hold",
+            vec![sig_in("in", "In"), trig_in("trigger", "Trigger")],
+            value_out(),
+            vec![],
+        ),
+        RANDOM => spec(
+            "Random",
+            vec![],
+            value_out(),
+            vec![
+                num("rate", "Changes per beat", 0.05, 16.0, 0.5),
+                toggle("smooth", "Smooth", true),
+                num("seed", "Seed", 0.0, 100.0, 1.0),
+            ],
+        ),
         AUDIO_SIGNAL => NodeSpec {
             kind: AUDIO_SIGNAL.into(),
             label: "Audio Signal".into(),
@@ -102,6 +260,10 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                 ParamDef {
                     label: "Wave".into(),
                     ..ParamDef::choice("wave", &Wave::ALL.map(|w| w.name()), 0)
+                },
+                ParamDef {
+                    label: "Phase offset".into(),
+                    ..ParamDef::float("offset", 0.0, 1.0, 0.0)
                 },
             ],
         },
@@ -143,14 +305,17 @@ pub enum Category {
     Effect,
     /// Makes a number that can drive any slider.
     Signal,
+    /// Fires events (hits, beats, thresholds).
+    Trigger,
     Output,
 }
 
 impl Category {
-    pub const ALL: [Category; 4] = [
+    pub const ALL: [Category; 5] = [
         Category::Source,
         Category::Effect,
         Category::Signal,
+        Category::Trigger,
         Category::Output,
     ];
 
@@ -159,6 +324,7 @@ impl Category {
             Category::Source => "Sources",
             Category::Effect => "Effects",
             Category::Signal => "Signals",
+            Category::Trigger => "Triggers",
             Category::Output => "Output",
         }
     }
@@ -171,6 +337,10 @@ pub struct CatalogueEntry {
     pub label: String,
     pub category: Category,
     pub description: String,
+    /// Types of its inputs (not counting the automatic mask).
+    pub inputs: Vec<PortType>,
+    /// Has number settings a Signal wire can drive.
+    pub modulatable: bool,
 }
 
 /// Every node type that can be added, sorted by category then name.
@@ -189,6 +359,8 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
                     Category::Source
                 },
                 description: meta.description.clone(),
+                inputs: meta.images.iter().map(|_| PortType::Image).collect(),
+                modulatable: meta.inputs.iter().any(|i| i.kind == InputKind::Float),
             })
         })
         .collect();
@@ -203,15 +375,67 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
             Category::Signal,
             "A wave locked to the beat. Wire it into a slider for steady, musical motion.",
         ),
+        (
+            MATH,
+            Category::Signal,
+            "Combine two signals: add, multiply, min/max, mix and more.",
+        ),
+        (
+            REMAP,
+            Category::Signal,
+            "Rescale a signal into a new range, with a curve. Bass 0 to 3 becomes zoom 1 to 1.5.",
+        ),
+        (
+            SMOOTH,
+            Category::Signal,
+            "Takes the jitter out of a signal, with separate rise and fall times.",
+        ),
+        (
+            ENVELOPE,
+            Category::Signal,
+            "Turns each trigger into a punch that fades out. Kick, Envelope, anything.",
+        ),
+        (
+            COUNTER,
+            Category::Signal,
+            "Counts triggers and steps through values: change colour every bar, every 4 kicks...",
+        ),
+        (
+            SAMPLE_HOLD,
+            Category::Signal,
+            "Grabs a signal on each trigger and holds it until the next.",
+        ),
+        (
+            RANDOM,
+            Category::Signal,
+            "A random value locked to the beat, smooth or stepped.",
+        ),
+        (
+            AUDIO_TRIGGER,
+            Category::Trigger,
+            "Fires on kicks, snares, hats, beats, bars, build-ups, drops or section changes.",
+        ),
+        (
+            BEAT_TRIGGER,
+            Category::Trigger,
+            "Fires every N beats, with an offset: a metronome for visuals.",
+        ),
+        (
+            GATE,
+            Category::Trigger,
+            "Fires when a signal rises above a threshold.",
+        ),
         (PROGRAM_OUT, Category::Output, "The final picture."),
     ];
     for (kind, category, description) in builtin {
         if let Some(spec) = builtin_spec(kind) {
             out.push(CatalogueEntry {
                 kind: kind.into(),
-                label: spec.label,
+                label: spec.label.clone(),
                 category,
                 description: description.into(),
+                inputs: spec.inputs.iter().map(|p| p.ty).collect(),
+                modulatable: spec.params.iter().any(|p| p.is_modulatable()),
             });
         }
     }
@@ -222,7 +446,10 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
 /// The category of a node kind (for its colour in the editor).
 pub fn category_of(kind: &str, outputs_image: bool, has_image_inputs: bool) -> Category {
     match kind {
-        AUDIO_SIGNAL | LFO => Category::Signal,
+        AUDIO_TRIGGER | BEAT_TRIGGER | GATE => Category::Trigger,
+        AUDIO_SIGNAL | LFO | MATH | REMAP | SMOOTH | ENVELOPE | COUNTER | SAMPLE_HOLD | RANDOM => {
+            Category::Signal
+        }
         PROGRAM_OUT => Category::Output,
         _ if outputs_image && !has_image_inputs => Category::Source,
         _ => Category::Effect,

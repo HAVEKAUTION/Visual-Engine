@@ -70,6 +70,8 @@ pub struct SceneView {
     pub ws: Workspace,
     /// Show the node graph (else the classic scene panel).
     pub graph_mode: bool,
+    /// The graph panel is on screen (thumbnails are only worth making then).
+    pub graph_visible: bool,
 }
 
 /// The source-tree folder `name` (when running from a checkout, so files are
@@ -146,6 +148,7 @@ impl SceneView {
             last_reload: None,
             ws,
             graph_mode: true,
+            graph_visible: true,
         };
         if let Some(first) = view.bank[0].clone() {
             view.load_preset(&first, false);
@@ -385,6 +388,9 @@ impl SceneView {
         if self.graph_mode {
             self.ws.tick();
             let targets = self.ws.targets();
+            let previews = self
+                .ws
+                .previews(self.graph_visible && self.ws.editor.thumbnails);
             self.ws.eval.run(
                 &self.ws.graph,
                 &self.library,
@@ -398,6 +404,7 @@ impl SceneView {
                     proxy: 1.0,
                 },
                 &targets,
+                &previews,
             );
             let show = self
                 .ws
@@ -471,6 +478,48 @@ impl SceneView {
                 eframe::wgpu::FilterMode::Linear,
             ),
         };
+        if self.graph_mode {
+            // Node pictures for thumbnails, picture-in-picture and wipe. The
+            // node textures swap every frame, so re-point them each frame.
+            let wanted: Vec<graph::NodeId> = if self.graph_visible && self.ws.editor.thumbnails {
+                self.ws.graph.nodes().iter().map(|n| n.id).collect()
+            } else {
+                self.ws.selected_picture().into_iter().collect()
+            };
+            let mut keep = std::collections::HashSet::new();
+            for node in wanted {
+                let Show::Node(key) = self.ws.eval.picture(node) else {
+                    continue;
+                };
+                let Some(view) = renderer.node_view(key) else {
+                    continue;
+                };
+                keep.insert(node);
+                match self.ws.thumbs.get(&node) {
+                    Some(tid) => egui_renderer.update_egui_texture_from_wgpu_texture(
+                        &rs.device,
+                        view,
+                        eframe::wgpu::FilterMode::Linear,
+                        *tid,
+                    ),
+                    None => {
+                        let tid = egui_renderer.register_native_texture(
+                            &rs.device,
+                            view,
+                            eframe::wgpu::FilterMode::Linear,
+                        );
+                        self.ws.thumbs.insert(node, tid);
+                    }
+                }
+            }
+            self.ws.thumbs.retain(|node, tid| {
+                let k = keep.contains(node);
+                if !k {
+                    egui_renderer.free_texture(tid);
+                }
+                k
+            });
+        }
         drop(egui_renderer);
         self.texture = Some((id, generation));
         ui.painter().image(
@@ -479,6 +528,11 @@ impl SceneView {
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             Color32::WHITE,
         );
+    }
+
+    /// A signal's current value (0 if unknown).
+    pub fn signal(&self, name: &str) -> f32 {
+        self.signals.get(name).unwrap_or(0.0)
     }
 
     /// The node graph editor (bottom panel).
@@ -502,7 +556,16 @@ impl SceneView {
     /// The scene panel.
     pub fn controls(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
-        ui.label(RichText::new("SCENE").strong());
+        ui.label(
+            RichText::new(if self.graph_mode {
+                "INSPECTOR"
+            } else {
+                "SCENE"
+            })
+            .size(11.0)
+            .strong()
+            .color(crate::theme::TEXT_WEAK),
+        );
         ui.separator();
         if self.renderer.is_none() {
             ui.label(RichText::new("No GPU renderer available.").color(ERROR_COLOR));

@@ -1,4 +1,7 @@
-//! The main window: side panel with audio sources, central preview area.
+//! The main window, one workspace (DIRECTION_UPDATE_v2.md, UI): toolbar on
+//! top, Media | Looks on the left, the viewer in the middle, the Inspector on
+//! the right, the node graph below and the signal strip at the very bottom.
+//! Panel sizes and toggles are remembered between sessions.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Instant;
@@ -8,12 +11,56 @@ use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
 use crate::analysis_thread::{self, Command, WaveformSnapshot};
 use crate::debug_panel;
+use crate::graph_view::ViewerMode;
 use crate::offline::{self, OfflineReport};
 use crate::rhythm_panel::RhythmView;
 use crate::scene_view::SceneView;
+use crate::theme;
 
-const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 12);
-const PANEL_BG: Color32 = Color32::from_rgb(20, 20, 26);
+const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 10);
+const PANEL_BG: Color32 = theme::PANEL;
+
+/// Left panel tabs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum LeftTab {
+    Media,
+    Looks,
+}
+
+/// Layout and view settings remembered between sessions.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct Prefs {
+    show_left: bool,
+    show_right: bool,
+    show_graph: bool,
+    show_strip: bool,
+    left_tab: LeftTab,
+    viewer: ViewerMode,
+    pip: bool,
+    snap: bool,
+    thumbnails: bool,
+    show_fps: bool,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            show_left: true,
+            show_right: true,
+            show_graph: true,
+            show_strip: true,
+            left_tab: LeftTab::Media,
+            viewer: ViewerMode::Program,
+            pip: true,
+            snap: true,
+            thumbnails: true,
+            show_fps: true,
+        }
+    }
+}
+
+const PREFS_KEY: &str = "workspace";
 const WAVE_COLOR: Color32 = Color32::from_rgb(90, 200, 255);
 const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 
@@ -44,15 +91,19 @@ pub struct VisualEngineApp {
     show_fps: bool,
     /// Node graph panel visible (Tab).
     show_graph: bool,
+    show_left: bool,
+    show_right: bool,
+    show_strip: bool,
+    left_tab: LeftTab,
 }
 
 impl VisualEngineApp {
     pub fn new(cc: &eframe::CreationContext<'_>, startup_song: Option<std::path::PathBuf>) -> Self {
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = PANEL_BG;
-        visuals.window_fill = PANEL_BG;
-        cc.egui_ctx.set_visuals(visuals);
+        theme::apply(&cc.egui_ctx);
+        let prefs: Prefs = cc
+            .storage
+            .and_then(|s| eframe::get_value(s, PREFS_KEY))
+            .unwrap_or_default();
 
         let gpu_info = match &cc.wgpu_render_state {
             Some(rs) => {
@@ -91,9 +142,17 @@ impl VisualEngineApp {
             scene: SceneView::new(cc),
             fullscreen: false,
             show_waveform: false,
-            show_fps: true,
-            show_graph: true,
+            show_fps: prefs.show_fps,
+            show_graph: prefs.show_graph,
+            show_left: prefs.show_left,
+            show_right: prefs.show_right,
+            show_strip: prefs.show_strip,
+            left_tab: prefs.left_tab,
         };
+        app.scene.ws.viewer = prefs.viewer;
+        app.scene.ws.pip = prefs.pip;
+        app.scene.ws.editor.snap = prefs.snap;
+        app.scene.ws.editor.thumbnails = prefs.thumbnails;
         app.rescan_inputs();
         if let Some(path) = startup_song {
             app.load_song(path);
@@ -181,12 +240,40 @@ impl VisualEngineApp {
         }
     }
 
-    fn side_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
-        ui.heading("Visual Engine");
-        ui.label(RichText::new("Milestone 3 · modulation + presets").weak());
-        ui.add_space(12.0);
+    fn left_panel(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.left_tab, LeftTab::Media, "Media");
+            ui.selectable_value(&mut self.left_tab, LeftTab::Looks, "Looks");
+        });
+        ui.separator();
+        match self.left_tab {
+            LeftTab::Media => {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.side_panel(ui));
+            }
+            LeftTab::Looks => {
+                ui.add_space(24.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new("No Looks yet.")
+                            .size(16.0)
+                            .color(Color32::from_gray(200)),
+                    );
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(
+                            "Looks are hand-made signature visuals you can switch, mutate and \
+                             breed. They arrive in M6. Until then, build your own in the graph.",
+                        )
+                        .weak(),
+                    );
+                });
+            }
+        }
+    }
 
+    fn side_panel(&mut self, ui: &mut egui::Ui) {
         // ---------------- Song file ----------------
         ui.label(RichText::new("SONG FILE").strong());
         ui.separator();
@@ -483,7 +570,11 @@ impl VisualEngineApp {
         painter.rect_filled(rect, CornerRadius::ZERO, PREVIEW_BG);
 
         let signal_frame = self.signals.latest().clone();
+        self.scene.graph_visible = self.show_graph && !self.fullscreen;
         self.scene.paint(ui, frame, rect, &signal_frame);
+        if self.scene.graph_mode && !self.fullscreen {
+            self.viewer_overlays(ui, rect);
+        }
 
         let snap = self.waveform.read();
         if self.show_waveform {
@@ -535,10 +626,257 @@ impl VisualEngineApp {
         }
     }
 
+    /// Wipe compare and picture-in-picture of the selected node.
+    fn viewer_overlays(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let ws = &mut self.scene.ws;
+        let Some(sel) = ws.selected_picture() else {
+            return;
+        };
+        let Some(tex) = ws.thumbs.get(&sel).copied() else {
+            return;
+        };
+        let painter = ui.painter_at(rect);
+        let full = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
+        match ws.viewer {
+            ViewerMode::Wipe => {
+                let x = rect.left() + rect.width() * ws.wipe;
+                let left = Rect::from_min_max(rect.min, Pos2::new(x, rect.bottom()));
+                let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(ws.wipe, 1.0));
+                painter.image(tex, left, uv, Color32::WHITE);
+                let handle = Rect::from_center_size(
+                    Pos2::new(x, rect.center().y),
+                    Vec2::new(14.0, rect.height()),
+                );
+                let r = ui.interact(handle, ui.scope_id().with("wipe"), Sense::drag());
+                if r.dragged()
+                    && let Some(p) = r.interact_pointer_pos()
+                {
+                    ws.wipe = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
+                }
+                let col = if r.hovered() || r.dragged() {
+                    theme::ACCENT
+                } else {
+                    Color32::from_white_alpha(200)
+                };
+                painter.line_segment(
+                    [Pos2::new(x, rect.top()), Pos2::new(x, rect.bottom())],
+                    Stroke::new(2.0, col),
+                );
+                painter.circle_filled(Pos2::new(x, rect.center().y), 7.0, col);
+                if r.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+            }
+            ViewerMode::Program if ws.pip => {
+                let w = (rect.width() * 0.26).clamp(120.0, 420.0);
+                let h = w * rect.height() / rect.width().max(1.0);
+                let r = Rect::from_min_size(
+                    Pos2::new(rect.right() - w - 12.0, rect.top() + 12.0),
+                    Vec2::new(w, h),
+                );
+                painter.rect_filled(r.expand(2.0), 4.0, Color32::from_black_alpha(200));
+                painter.image(tex, r, full, Color32::WHITE);
+                painter.rect_stroke(
+                    r.expand(1.0),
+                    3.0,
+                    Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.7)),
+                    egui::StrokeKind::Outside,
+                );
+                if let Some(n) = ws.graph.node(sel) {
+                    let text = format!("{:02} {}", sel.0, n.label);
+                    let g = painter.layout_no_wrap(
+                        text,
+                        egui::FontId::proportional(11.5),
+                        Color32::WHITE,
+                    );
+                    let at = r.left_bottom() + Vec2::new(6.0, -g.size().y - 5.0);
+                    painter.rect_filled(
+                        Rect::from_min_size(at - Vec2::splat(3.0), g.size() + Vec2::splat(6.0)),
+                        3.0,
+                        Color32::from_black_alpha(170),
+                    );
+                    painter.galley(at, g, Color32::WHITE);
+                }
+                // Click the PiP to view that node full size.
+                let resp = ui.interact(r, ui.scope_id().with("pip"), Sense::click());
+                if resp.clicked() {
+                    ws.viewer = ViewerMode::Selected;
+                }
+                resp.on_hover_text("Selected node. Click to view it full size (V toggles back).");
+            }
+            _ => {}
+        }
+    }
+
+    /// The bar across the top: panels, viewer mode, graph options.
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_centered(|ui| {
+            ui.label(
+                RichText::new("VISUAL ENGINE")
+                    .strong()
+                    .size(12.5)
+                    .color(theme::ACCENT),
+            );
+            ui.add_space(14.0);
+            ui.toggle_value(&mut self.show_left, "Media")
+                .on_hover_text("Songs, live input, analysis (left panel)");
+            ui.toggle_value(&mut self.show_right, "Inspector")
+                .on_hover_text("Settings of the selected node (right panel)");
+            if self.scene.graph_mode {
+                ui.toggle_value(&mut self.show_graph, "Graph")
+                    .on_hover_text("The node graph (Tab)");
+            }
+            ui.toggle_value(&mut self.show_strip, "Signals")
+                .on_hover_text("The signal strip along the bottom");
+            ui.separator();
+            if self.scene.graph_mode {
+                let ws = &mut self.scene.ws;
+                ui.label(RichText::new("Viewer").small().weak());
+                ui.selectable_value(&mut ws.viewer, ViewerMode::Program, "Program")
+                    .on_hover_text("The final output (V)");
+                ui.selectable_value(&mut ws.viewer, ViewerMode::Selected, "Selected")
+                    .on_hover_text("The selected node's picture (V)");
+                ui.selectable_value(&mut ws.viewer, ViewerMode::Wipe, "Wipe")
+                    .on_hover_text("Split screen: selected node | program. Drag the line (W)");
+                ui.toggle_value(&mut ws.pip, "PiP")
+                    .on_hover_text("Small picture of the selected node over the program");
+                ui.separator();
+                ui.toggle_value(&mut ws.editor.snap, "Snap")
+                    .on_hover_text("Snap nodes to the grid (G)");
+                ui.toggle_value(&mut ws.editor.thumbnails, "Thumbnails")
+                    .on_hover_text("Live pictures inside nodes");
+                if ui
+                    .add_enabled(ws.history.can_undo(), egui::Button::new("↶"))
+                    .on_hover_text("Undo (Ctrl+Z)")
+                    .clicked()
+                {
+                    let _ = ws.history.undo(&mut ws.graph);
+                }
+                if ui
+                    .add_enabled(ws.history.can_redo(), egui::Button::new("↷"))
+                    .on_hover_text("Redo (Ctrl+Shift+Z)")
+                    .clicked()
+                {
+                    let _ = ws.history.redo(&mut ws.graph);
+                }
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button("?")
+                    .on_hover_text("Graph shortcuts. H shows the performance keys.")
+                    .clicked()
+                {
+                    self.show_graph = true;
+                    self.scene.ws.editor.show_help = !self.scene.ws.editor.show_help;
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "{:.0} fps · {:.1} ms",
+                        self.scene.fps, self.scene.frame_ms
+                    ))
+                    .small()
+                    .monospace()
+                    .weak(),
+                );
+            });
+        });
+    }
+
+    /// The thin strip along the bottom: band levels, hits, tempo, phase.
+    fn signal_strip(&self, ui: &mut egui::Ui) {
+        let sig = |n: &str| self.scene.signal(n);
+        let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+        let p = ui.painter_at(rect);
+        let cy = rect.center().y;
+        let mut x = rect.left() + 10.0;
+        let font = egui::FontId::proportional(10.5);
+        let weak = theme::TEXT_WEAK;
+        // Six bands.
+        for (name, label) in [
+            ("sub_fast", "SUB"),
+            ("bass_fast", "BASS"),
+            ("low_mid_fast", "LMID"),
+            ("mid_fast", "MID"),
+            ("high_mid_fast", "HMID"),
+            ("air_fast", "AIR"),
+        ] {
+            let g = p.layout_no_wrap(label.into(), font.clone(), weak);
+            p.galley(Pos2::new(x, cy - g.size().y * 0.5), g.clone(), weak);
+            x += g.size().x + 4.0;
+            let bar = Rect::from_min_size(Pos2::new(x, cy - 3.0), Vec2::new(46.0, 6.0));
+            p.rect_filled(bar, 2.0, Color32::from_gray(34));
+            let v = (sig(name) / 3.0).clamp(0.0, 1.0);
+            let mut f = bar;
+            f.set_width(bar.width() * v);
+            p.rect_filled(f, 2.0, Color32::from_rgb(90, 170, 255));
+            x += 54.0;
+        }
+        x += 6.0;
+        // Hits.
+        for (name, label, col) in [
+            ("kick_age", "K", Color32::from_rgb(255, 120, 80)),
+            ("snare_age", "S", Color32::from_rgb(255, 210, 90)),
+            ("hat_age", "H", Color32::from_rgb(140, 230, 255)),
+        ] {
+            let lit = (-sig(name) / 0.12).exp().clamp(0.0, 1.0);
+            let c = Pos2::new(x + 7.0, cy);
+            p.circle_filled(c, 7.0, lerp(Color32::from_gray(40), col, lit));
+            p.text(
+                c,
+                egui::Align2::CENTER_CENTER,
+                label,
+                font.clone(),
+                Color32::BLACK,
+            );
+            x += 19.0;
+        }
+        x += 10.0;
+        let bpm = sig("bpm");
+        let text = if bpm > 1.0 {
+            format!("{bpm:.1} BPM")
+        } else {
+            "— BPM".into()
+        };
+        let g = p.layout_no_wrap(text, egui::FontId::monospace(11.5), theme::TEXT);
+        p.galley(Pos2::new(x, cy - g.size().y * 0.5), g.clone(), theme::TEXT);
+        x += g.size().x + 12.0;
+        // Beat dots (4 per bar), then bar and phrase progress.
+        let bar_phase = sig("bar_phase").clamp(0.0, 0.9999);
+        let beat_in_bar = (bar_phase * 4.0).floor() as i32;
+        let beat_lit = (1.0 - sig("beat_phase")).clamp(0.0, 1.0).powf(3.0);
+        for i in 0..4 {
+            let on = i == beat_in_bar;
+            let col = if on {
+                lerp(Color32::from_gray(90), theme::ACCENT, beat_lit.max(0.35))
+            } else {
+                Color32::from_gray(48)
+            };
+            p.circle_filled(Pos2::new(x + 5.0 + i as f32 * 13.0, cy), 4.5, col);
+        }
+        x += 58.0;
+        for (label, v) in [("BAR", bar_phase), ("PHRASE", sig("phrase_phase"))] {
+            let g = p.layout_no_wrap(label.into(), font.clone(), weak);
+            p.galley(Pos2::new(x, cy - g.size().y * 0.5), g.clone(), weak);
+            x += g.size().x + 4.0;
+            let bar = Rect::from_min_size(Pos2::new(x, cy - 2.0), Vec2::new(60.0, 4.0));
+            p.rect_filled(bar, 2.0, Color32::from_gray(34));
+            let mut f = bar;
+            f.set_width(bar.width() * v.clamp(0.0, 1.0));
+            p.rect_filled(f, 2.0, theme::ACCENT.gamma_multiply(0.8));
+            x += 70.0;
+        }
+        let _ = x;
+    }
+
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
         self.fullscreen = !self.fullscreen;
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
     }
+}
+
+fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
+    let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t).round() as u8;
+    Color32::from_rgb(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()))
 }
 
 /// The 48 kHz feed's waveform, drawn as an overlay across the middle.
@@ -630,6 +968,23 @@ impl VisualEngineApp {
 }
 
 impl eframe::App for VisualEngineApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        let ws = &self.scene.ws;
+        let prefs = Prefs {
+            show_left: self.show_left,
+            show_right: self.show_right,
+            show_graph: self.show_graph,
+            show_strip: self.show_strip,
+            left_tab: self.left_tab,
+            viewer: ws.viewer,
+            pip: ws.pip,
+            snap: ws.editor.snap,
+            thumbnails: ws.editor.thumbnails,
+            show_fps: self.show_fps,
+        };
+        eframe::set_value(storage, PREFS_KEY, &prefs);
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_loading();
         self.poll_offline();
@@ -646,12 +1001,29 @@ impl eframe::App for VisualEngineApp {
         // Node-graph keys go first so the performance keys don't eat them
         // (Shift+Space = add node, Tab = hide/show the graph).
         if !typing && self.scene.graph_mode {
-            let (search, tab) = ui.input_mut(|i| {
+            let (search, tab, v, w) = ui.input_mut(|i| {
                 (
                     i.consume_key(egui::Modifiers::SHIFT, egui::Key::Space),
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::V),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::W),
                 )
             });
+            let ws = &mut self.scene.ws;
+            if v {
+                ws.viewer = if ws.viewer == ViewerMode::Selected {
+                    ViewerMode::Program
+                } else {
+                    ViewerMode::Selected
+                };
+            }
+            if w {
+                ws.viewer = if ws.viewer == ViewerMode::Wipe {
+                    ViewerMode::Program
+                } else {
+                    ViewerMode::Wipe
+                };
+            }
             if search {
                 self.show_graph = true;
                 self.scene.ws.editor.open_search(ui.ctx());
@@ -701,6 +1073,22 @@ impl eframe::App for VisualEngineApp {
             return;
         }
 
+        egui::Panel::top("toolbar")
+            .exact_size(32.0)
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme::DEEP)
+                    .inner_margin(egui::Margin::symmetric(8, 0)),
+            )
+            .show(ui, |ui| self.toolbar(ui));
+
+        if self.show_strip {
+            egui::Panel::bottom("strip")
+                .exact_size(26.0)
+                .frame(egui::Frame::NONE.fill(theme::DEEP))
+                .show(ui, |ui| self.signal_strip(ui));
+        }
+
         if self.show_meters {
             self.update_hop_rate(sf.hop_index);
             let rate = self.hops_per_sec;
@@ -722,17 +1110,23 @@ impl eframe::App for VisualEngineApp {
                 .show(ui, |ui| self.scene.graph_panel(ui));
         }
 
-        egui::Panel::left("sources")
-            .resizable(true)
-            .default_size(320.0)
-            .size_range(260.0..=520.0)
-            .frame(
-                egui::Frame::side_top_panel(ui.style())
-                    .fill(PANEL_BG)
-                    .inner_margin(12.0),
-            )
-            .show(ui, |ui| self.side_panel(ui));
+        if self.show_left {
+            egui::Panel::left("sources")
+                .resizable(true)
+                .default_size(300.0)
+                .size_range(240.0..=520.0)
+                .frame(
+                    egui::Frame::side_top_panel(ui.style())
+                        .fill(PANEL_BG)
+                        .inner_margin(10.0),
+                )
+                .show(ui, |ui| self.left_panel(ui));
+        }
 
+        if !self.show_right {
+            egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
+            return;
+        }
         egui::Panel::right("scene")
             .resizable(true)
             .default_size(340.0)

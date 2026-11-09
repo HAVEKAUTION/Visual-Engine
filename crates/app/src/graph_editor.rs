@@ -1,12 +1,13 @@
 //! The node graph editor (Resolve-style): a pan/zoom canvas with numbered
-//! nodes, colour-coded plugs and wires, a right-click add menu, Shift+Space
-//! search, selection (click, Shift/Ctrl+click, box), copy/paste, delete,
+//! nodes, colour-coded plugs and wires, live thumbnails, Frames (coloured
+//! backdrops that keep areas tidy), snap-to-grid, a right-click add menu,
+//! Shift+Space search, S/P/L quick insert, selection, copy/paste, delete,
 //! bypass and undo/redo.
 //!
 //! Mouse: drag from a plug to wire it; drag a wire off an input to unplug it;
-//! drop a blue Signal wire on a node (or on a slider in the Inspector) to
-//! make it drive that slider. Scroll = zoom, middle-drag (or Space/Alt +
-//! drag) = pan.
+//! drop a wire on empty space to add a node already wired to it; drop a blue
+//! Signal wire on a node (or on a slider in the Inspector) to make it drive
+//! that slider. Scroll = zoom, middle-drag (or Space/Alt + drag) = pan.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -15,25 +16,46 @@ use egui::{
     Align2, Color32, CornerRadius, FontId, Id, Key, LayerId, Order, PointerButton, Pos2, Rect,
     Sense, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
-use graph::{Command, Endpoint, Graph, History, Link, Node, NodeId, OutputRef, PortType};
+use graph::{
+    Command, Endpoint, Frame, Graph, History, Link, Node, NodeId, OutputRef, ParamValue, PortType,
+};
 use nodes::Evaluator;
 use nodes::registry::{self, CatalogueEntry, Category};
 use scenes::SceneLibrary;
 use serde::{Deserialize, Serialize};
 
-pub const ACCENT: Color32 = Color32::from_rgb(255, 170, 60);
-pub const CANVAS_BG: Color32 = Color32::from_rgb(20, 20, 23);
-const GRID: Color32 = Color32::from_rgb(34, 34, 39);
-const NODE_BG: Color32 = Color32::from_rgb(40, 40, 46);
-const NODE_HEADER: Color32 = Color32::from_rgb(52, 52, 59);
-const TEXT: Color32 = Color32::from_gray(225);
-const TEXT_DIM: Color32 = Color32::from_gray(140);
-const ERROR: Color32 = Color32::from_rgb(255, 110, 110);
+use crate::theme;
+
+pub const ACCENT: Color32 = theme::ACCENT;
+pub const CANVAS_BG: Color32 = theme::DEEP;
+const GRID_DOT: Color32 = Color32::from_rgb(36, 36, 42);
+const GRID_DOT_MAJOR: Color32 = Color32::from_rgb(50, 50, 58);
+const NODE_BG: Color32 = Color32::from_rgb(36, 36, 42);
+const NODE_HEADER: Color32 = Color32::from_rgb(48, 48, 56);
+const TEXT: Color32 = theme::TEXT;
+const TEXT_DIM: Color32 = Color32::from_gray(135);
+const ERROR: Color32 = theme::ERROR;
 
 const NODE_W: f32 = 170.0;
 const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 18.0;
 const PORT_R: f32 = 5.0;
+const THUMB_H: f32 = (NODE_W - 12.0) * 9.0 / 16.0;
+/// Snap grid (graph units).
+pub const GRID: f32 = 16.0;
+const FRAME_TITLE_H: f32 = 24.0;
+
+/// Colour tags offered for nodes and frames.
+pub const TAG_COLOURS: [[u8; 3]; 8] = [
+    [226, 92, 92],
+    [236, 148, 64],
+    [230, 204, 80],
+    [110, 200, 100],
+    [70, 190, 180],
+    [80, 150, 240],
+    [150, 110, 240],
+    [220, 100, 190],
+];
 
 /// Wire / plug colour per data type.
 pub fn port_colour(ty: PortType) -> Color32 {
@@ -45,13 +67,18 @@ pub fn port_colour(ty: PortType) -> Color32 {
     }
 }
 
-fn category_colour(c: Category) -> Color32 {
+pub fn category_colour(c: Category) -> Color32 {
     match c {
         Category::Source => Color32::from_rgb(70, 190, 180),
         Category::Effect => Color32::from_rgb(160, 120, 255),
         Category::Signal => port_colour(PortType::Signal),
+        Category::Trigger => port_colour(PortType::Trigger),
         Category::Output => ACCENT,
     }
+}
+
+fn rgb(c: [u8; 3]) -> Color32 {
+    Color32::from_rgb(c[0], c[1], c[2])
 }
 
 fn category(n: &Node) -> Category {
@@ -60,6 +87,15 @@ fn category(n: &Node) -> Category {
         n.outputs.iter().any(|p| p.ty == PortType::Image),
         n.inputs.iter().any(|p| p.ty == PortType::Image),
     )
+}
+
+fn type_name(ty: PortType) -> &'static str {
+    match ty {
+        PortType::Image => "picture",
+        PortType::Mask => "mask",
+        PortType::Signal => "signal",
+        PortType::Trigger => "trigger",
+    }
 }
 
 /// What is under the pointer.
@@ -71,6 +107,8 @@ enum Hit {
     Output(NodeId, String),
     /// The row of a parameter that has Signal wires plugged in.
     ModRow(NodeId, String),
+    FrameTitle(u32),
+    FrameResize(u32),
 }
 
 /// Where a node's parts sit, in graph units.
@@ -80,37 +118,27 @@ struct Layout {
     outputs: Vec<(String, String, PortType, Pos2)>,
     /// Parameters with Signal wires: (param name, label, plug position).
     mods: Vec<(String, String, Pos2)>,
+    thumb: Option<Rect>,
 }
 
-fn layout(g: &Graph, n: &Node) -> Layout {
+fn layout(g: &Graph, n: &Node, thumbs: bool) -> Layout {
     let min = pos2(n.pos[0], n.pos[1]);
     let row_y = |i: usize| min.y + HEADER_H + ROW_H * (i as f32 + 0.5) + 2.0;
-    let inputs: Vec<_> = n
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            (
-                p.name.clone(),
-                p.label().to_string(),
-                p.ty,
-                pos2(min.x, row_y(i)),
-            )
-        })
-        .collect();
-    let outputs: Vec<_> = n
-        .outputs
-        .iter()
-        .enumerate()
-        .map(|(i, p)| {
-            (
-                p.name.clone(),
-                p.label().to_string(),
-                p.ty,
-                pos2(min.x + NODE_W, row_y(i)),
-            )
-        })
-        .collect();
+    let ports = |list: &[graph::PortDef], x: f32| -> Vec<(String, String, PortType, Pos2)> {
+        list.iter()
+            .enumerate()
+            .map(|(i, p)| {
+                (
+                    p.name.clone(),
+                    p.label().to_string(),
+                    p.ty,
+                    pos2(x, row_y(i)),
+                )
+            })
+            .collect()
+    };
+    let inputs = ports(&n.inputs, min.x);
+    let outputs = ports(&n.outputs, min.x + NODE_W);
     let first = inputs.len().max(outputs.len());
     let mods: Vec<_> = n
         .params
@@ -126,21 +154,68 @@ fn layout(g: &Graph, n: &Node) -> Layout {
         })
         .collect();
     let rows = (first + mods.len()).max(1);
+    let body = HEADER_H + ROW_H * rows as f32 + 8.0;
+    let thumb = (thumbs && n.makes_image())
+        .then(|| Rect::from_min_size(min + vec2(6.0, body), vec2(NODE_W - 12.0, THUMB_H)));
+    let h = body + thumb.map_or(0.0, |t| t.height() + 6.0);
     Layout {
-        rect: Rect::from_min_size(min, vec2(NODE_W, HEADER_H + ROW_H * rows as f32 + 8.0)),
+        rect: Rect::from_min_size(min, vec2(NODE_W, h)),
         inputs,
         outputs,
         mods,
+        thumb,
     }
+}
+
+fn frame_rect(f: &Frame) -> Rect {
+    Rect::from_min_size(pos2(f.rect[0], f.rect[1]), vec2(f.rect[2], f.rect[3]))
+}
+
+fn snap(v: f32, on: bool) -> f32 {
+    if on { (v / GRID).round() * GRID } else { v }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 enum Drag {
     None,
-    Nodes,
-    Wire { from: OutputRef, ty: PortType },
-    Box { start: Pos2 },
+    /// Moving nodes (and frames carried along): start positions + total offset.
+    Nodes {
+        start: Vec<(NodeId, [f32; 2])>,
+        offset: Vec2,
+    },
+    Frame {
+        id: u32,
+        start: [f32; 4],
+        nodes: Vec<(NodeId, [f32; 2])>,
+        offset: Vec2,
+    },
+    FrameResize {
+        id: u32,
+        start: [f32; 4],
+        offset: Vec2,
+    },
+    Wire {
+        from: OutputRef,
+        ty: PortType,
+    },
+    Box {
+        start: Pos2,
+    },
     Pan,
+}
+
+/// What a newly added node should be wired into.
+#[derive(Clone, Debug, PartialEq)]
+enum Insert {
+    None,
+    /// S: after this node, taking over its outputs.
+    Serial(NodeId),
+    /// P: beside this node, blended 50/50 with it by a new Merge.
+    Parallel(NodeId),
+    /// L: on top of this node, by a new Merge.
+    Layer(NodeId),
+    /// Dropped a wire on empty space: plug it into the new node.
+    FromWire(OutputRef, PortType),
 }
 
 struct Search {
@@ -151,6 +226,7 @@ struct Search {
     screen: Pos2,
     pick: usize,
     focus: bool,
+    insert: Insert,
 }
 
 /// Copied nodes (and the wires between them), as RON on the clipboard, so
@@ -159,6 +235,8 @@ struct Search {
 struct Clip {
     nodes: Vec<Node>,
     links: Vec<Link>,
+    #[serde(default)]
+    frames: Vec<Frame>,
 }
 
 const CLIP_TAG: &str = "visual-engine-nodes ";
@@ -169,14 +247,21 @@ pub struct Editor {
     drag: Drag,
     pub selected: BTreeSet<NodeId>,
     menu_target: Hit,
-    /// Graph position of the last right-click (where added nodes go).
+    /// Graph position of the pointer / last right-click (where nodes go).
     menu_at: Pos2,
     search: Option<Search>,
     /// A Signal wire was dropped on a node: pick which slider it drives.
     param_pick: Option<(OutputRef, NodeId, Pos2)>,
+    /// Renaming a frame: (id, text, screen position).
+    frame_rename: Option<(u32, String, Pos2)>,
     framed: bool,
+    /// When each trigger node last fired (for the flash).
+    fired: HashMap<NodeId, f64>,
     /// Short message for the user (bad wire etc.).
     pub message: Option<(String, f64)>,
+    pub snap: bool,
+    pub thumbnails: bool,
+    pub show_help: bool,
 }
 
 impl Default for Editor {
@@ -190,8 +275,13 @@ impl Default for Editor {
             menu_at: Pos2::ZERO,
             search: None,
             param_pick: None,
+            frame_rename: None,
             framed: false,
+            fired: HashMap::new(),
             message: None,
+            snap: true,
+            thumbnails: true,
+            show_help: false,
         }
     }
 }
@@ -205,6 +295,8 @@ pub struct Ctx<'a> {
     pub library: &'a SceneLibrary,
     /// Node shown in the viewer.
     pub viewed: Option<NodeId>,
+    /// Live picture of each node, for thumbnails.
+    pub thumbs: &'a HashMap<NodeId, egui::TextureId>,
 }
 
 impl Editor {
@@ -226,6 +318,10 @@ impl Editor {
 
     /// Open the search-to-add box (Shift+Space).
     pub fn open_search(&mut self, ctx: &egui::Context) {
+        self.open_search_with(ctx, Insert::None);
+    }
+
+    fn open_search_with(&mut self, ctx: &egui::Context, insert: Insert) {
         let screen = ctx
             .pointer_hover_pos()
             .unwrap_or_else(|| ctx.content_rect().center());
@@ -235,6 +331,7 @@ impl Editor {
             screen,
             pick: 0,
             focus: true,
+            insert,
         });
     }
 
@@ -246,6 +343,8 @@ impl Editor {
         let rect = ui.available_rect_before_wrap();
         let resp = ui.allocate_rect(rect, Sense::click_and_drag());
         let painter = ui.painter_at(rect);
+        let now = ui.input(|i| i.time);
+        let thumbs_on = self.thumbnails;
         if !self.framed {
             self.frame_all(c.graph, rect);
             self.framed = true;
@@ -255,14 +354,14 @@ impl Editor {
         let to_graph = |s: &Self, p: Pos2| ((p - origin(s)) / s.zoom).to_pos2();
 
         // Zoom around the pointer.
-        if resp.hovered() {
+        if resp.hovered() && self.search.is_none() {
             let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
             let f = (scroll * 0.0015).exp() * pinch;
             if (f - 1.0).abs() > 1e-4
                 && let Some(p) = resp.hover_pos()
             {
                 let before = to_graph(self, p);
-                self.zoom = (self.zoom * f).clamp(0.3, 2.5);
+                self.zoom = (self.zoom * f).clamp(0.25, 2.5);
                 self.pan = p - rect.min - before.to_vec2() * self.zoom;
             }
         }
@@ -274,12 +373,23 @@ impl Editor {
             self.menu_at = to_graph(self, p);
         }
 
+        // Trigger flashes.
+        for n in c.graph.nodes() {
+            if n.outputs.iter().any(|o| o.ty == PortType::Trigger)
+                && c.eval.signal_value(n.id).is_some_and(|v| v > 0.5)
+            {
+                self.fired.insert(n.id, now);
+            }
+        }
+        self.fired.retain(|id, _| c.graph.node(*id).is_some());
+
         let layouts: Vec<(NodeId, Layout)> = c
             .graph
             .nodes()
             .iter()
-            .map(|n| (n.id, layout(c.graph, n)))
+            .map(|n| (n.id, layout(c.graph, n, thumbs_on)))
             .collect();
+        let frames: Vec<Frame> = c.graph.frames().to_vec();
         let hit = |s: &Self, p: Pos2| -> Hit {
             let gp = to_graph(s, p);
             let r = (PORT_R * 1.8).max(8.0 / s.zoom);
@@ -303,6 +413,17 @@ impl Editor {
             for (id, l) in layouts.iter().rev() {
                 if l.rect.contains(gp) {
                     return Hit::Node(*id);
+                }
+            }
+            for f in frames.iter().rev() {
+                let fr = frame_rect(f);
+                let handle = Rect::from_min_max(fr.max - vec2(18.0, 18.0), fr.max);
+                if handle.contains(gp) {
+                    return Hit::FrameResize(f.id);
+                }
+                let title = Rect::from_min_size(fr.min, vec2(fr.width(), FRAME_TITLE_H));
+                if title.contains(gp) {
+                    return Hit::FrameTitle(f.id);
                 }
             }
             Hit::None
@@ -361,7 +482,41 @@ impl Editor {
                         }
                         self.selected.insert(n);
                     }
-                    self.drag = Drag::Nodes;
+                    let start = self
+                        .selected
+                        .iter()
+                        .filter_map(|id| c.graph.node(*id))
+                        .map(|n| (n.id, n.pos))
+                        .collect();
+                    self.drag = Drag::Nodes {
+                        start,
+                        offset: Vec2::ZERO,
+                    };
+                }
+                Hit::FrameTitle(id) => {
+                    if let Some(f) = c.graph.frame(id) {
+                        let fr = frame_rect(f);
+                        let nodes = layouts
+                            .iter()
+                            .filter(|(_, l)| fr.contains(l.rect.center()))
+                            .filter_map(|(id, _)| c.graph.node(*id).map(|n| (n.id, n.pos)))
+                            .collect();
+                        self.drag = Drag::Frame {
+                            id,
+                            start: f.rect,
+                            nodes,
+                            offset: Vec2::ZERO,
+                        };
+                    }
+                }
+                Hit::FrameResize(id) => {
+                    if let Some(f) = c.graph.frame(id) {
+                        self.drag = Drag::FrameResize {
+                            id,
+                            start: f.rect,
+                            offset: Vec2::ZERO,
+                        };
+                    }
                 }
                 Hit::None => {
                     if !add_select {
@@ -370,21 +525,62 @@ impl Editor {
                     self.drag = Drag::Box { start };
                 }
             }
-        } else if resp.dragged_by(PointerButton::Primary) && self.drag == Drag::Nodes {
+        } else if resp.dragged_by(PointerButton::Primary) {
             let d = resp.drag_delta() / self.zoom;
-            if d != Vec2::ZERO {
-                let moves: Vec<Command> = self
-                    .selected
-                    .iter()
-                    .filter_map(|id| c.graph.node(*id))
-                    .map(|n| Command::Move {
-                        node: n.id,
-                        pos: [n.pos[0] + d.x, n.pos[1] + d.y],
-                    })
-                    .collect();
+            let snap_on = self.snap;
+            let mut cmds = Vec::new();
+            match &mut self.drag {
+                Drag::Nodes { start, offset } => {
+                    *offset += d;
+                    for (id, p) in start.iter() {
+                        cmds.push(Command::Move {
+                            node: *id,
+                            pos: [
+                                snap(p[0] + offset.x, snap_on),
+                                snap(p[1] + offset.y, snap_on),
+                            ],
+                        });
+                    }
+                }
+                Drag::Frame {
+                    id,
+                    start,
+                    nodes,
+                    offset,
+                } => {
+                    *offset += d;
+                    let dx = snap(start[0] + offset.x, snap_on) - start[0];
+                    let dy = snap(start[1] + offset.y, snap_on) - start[1];
+                    if let Some(f) = c.graph.frame(*id) {
+                        cmds.push(Command::PutFrame(Frame {
+                            rect: [start[0] + dx, start[1] + dy, start[2], start[3]],
+                            ..f.clone()
+                        }));
+                    }
+                    for (n, p) in nodes.iter() {
+                        cmds.push(Command::Move {
+                            node: *n,
+                            pos: [p[0] + dx, p[1] + dy],
+                        });
+                    }
+                }
+                Drag::FrameResize { id, start, offset } => {
+                    *offset += d;
+                    if let Some(f) = c.graph.frame(*id) {
+                        let w = snap(start[2] + offset.x, snap_on).max(120.0);
+                        let h = snap(start[3] + offset.y, snap_on).max(60.0);
+                        cmds.push(Command::PutFrame(Frame {
+                            rect: [start[0], start[1], w, h],
+                            ..f.clone()
+                        }));
+                    }
+                }
+                _ => {}
+            }
+            if !cmds.is_empty() {
                 let _ = c
                     .history
-                    .exec_merge(c.graph, Command::Batch(moves), Some("move"));
+                    .exec_merge(c.graph, Command::Batch(cmds), Some("move"));
             }
         }
         if resp.drag_stopped() {
@@ -422,32 +618,84 @@ impl Editor {
                         self.selected = BTreeSet::from([n]);
                     }
                 }
-                Hit::None => self.selected.clear(),
+                _ => self.selected.clear(),
             }
         }
         if resp.double_clicked()
             && let Some(p) = resp.interact_pointer_pos()
-            && hit(self, p) == Hit::None
         {
-            self.open_search(ui.ctx());
+            match hit(self, p) {
+                Hit::None => self.open_search(ui.ctx()),
+                Hit::FrameTitle(id) => {
+                    if let Some(f) = c.graph.frame(id) {
+                        self.frame_rename = Some((id, f.label.clone(), p));
+                    }
+                }
+                _ => {}
+            }
         }
         if resp.secondary_clicked()
             && let Some(p) = resp.interact_pointer_pos()
         {
             self.menu_target = hit(self, p);
-            if let Hit::Node(n) = self.menu_target
+            if let Hit::Node(n) | Hit::Input(n, _) | Hit::Output(n, _) | Hit::ModRow(n, _) =
+                self.menu_target
                 && !self.selected.contains(&n)
             {
                 self.selected = BTreeSet::from([n]);
             }
         }
         let mut action: Option<MenuAction> = None;
+        let selected_count = self.selected.len();
+        let menu_target = self.menu_target.clone();
         resp.context_menu(|ui| {
-            action = match self.menu_target.clone() {
-                Hit::None => add_menu(ui, c.catalogue),
-                _ => node_menu(ui, self.selected.len()),
+            action = match &menu_target {
+                Hit::None => add_menu(ui, c.catalogue, selected_count),
+                Hit::FrameTitle(id) | Hit::FrameResize(id) => frame_menu(ui, *id),
+                _ => node_menu(ui, selected_count),
             };
         });
+
+        // Hover help: what a node or plug is.
+        if matches!(self.drag, Drag::None)
+            && self.search.is_none()
+            && let Some(p) = pointer.filter(|p| rect.contains(*p))
+        {
+            let tip = match hit(self, p) {
+                Hit::Input(n, port) | Hit::Output(n, port) => c.graph.node(n).and_then(|node| {
+                    let def = node.input(&port).or_else(|| node.output(&port))?;
+                    let mut t = format!(
+                        "{} · {} plug",
+                        if def.label().is_empty() {
+                            def.name.as_str()
+                        } else {
+                            def.label()
+                        },
+                        type_name(def.ty)
+                    );
+                    if def.ty == PortType::Mask {
+                        t += "\nLimits where this node's effect shows (masks arrive in M5).";
+                    }
+                    Some(t)
+                }),
+                Hit::Node(n) => c.graph.node(n).map(|node| {
+                    let desc = c
+                        .catalogue
+                        .iter()
+                        .find(|e| e.kind == node.kind)
+                        .map(|e| e.description.clone())
+                        .unwrap_or_default();
+                    match c.eval.errors.get(&n) {
+                        Some(e) => format!("{desc}\n\n⚠ {e}"),
+                        None => desc,
+                    }
+                }),
+                _ => None,
+            };
+            if let Some(t) = tip.filter(|t| !t.is_empty()) {
+                resp.clone().on_hover_text_at_pointer(t);
+            }
+        }
 
         // ---- Keyboard ----
         let typing = ui.ctx().egui_wants_keyboard_input();
@@ -455,41 +703,95 @@ impl Editor {
         // elsewhere never deletes anything.
         let over = resp.hovered() || resp.contains_pointer();
         if !typing {
-            let (events, del, redo, undo, bypass, all, home) = ui.input_mut(|i| {
+            let keys = ui.input_mut(|i| {
                 let cmd = i.modifiers.command;
-                (
-                    i.events.clone(),
-                    !cmd && (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)),
-                    i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::Z)
+                let none = egui::Modifiers::NONE;
+                Keys {
+                    events: i.events.clone(),
+                    del: !cmd && (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)),
+                    redo: i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::Z)
                         || i.consume_key(egui::Modifiers::COMMAND, Key::Y),
-                    i.consume_key(egui::Modifiers::COMMAND, Key::Z),
-                    i.consume_key(egui::Modifiers::COMMAND, Key::D),
-                    i.consume_key(egui::Modifiers::COMMAND, Key::A),
-                    i.key_pressed(Key::Home),
-                )
+                    undo: i.consume_key(egui::Modifiers::COMMAND, Key::Z),
+                    bypass: i.consume_key(egui::Modifiers::COMMAND, Key::D),
+                    all: i.consume_key(egui::Modifiers::COMMAND, Key::A),
+                    home: i.key_pressed(Key::Home),
+                    serial: !cmd && i.key_pressed(Key::S),
+                    parallel: !cmd && i.key_pressed(Key::P),
+                    layer: !cmd && i.key_pressed(Key::L),
+                    grid: !cmd && i.key_pressed(Key::G),
+                    help: i.consume_key(none, Key::Questionmark)
+                        || i.consume_key(egui::Modifiers::SHIFT, Key::Questionmark)
+                        || i.consume_key(egui::Modifiers::SHIFT, Key::Slash),
+                    esc: i.key_pressed(Key::Escape),
+                }
             });
-            if redo {
+            if keys.redo {
                 let _ = c.history.redo(c.graph);
-            } else if undo {
+            } else if keys.undo {
                 let _ = c.history.undo(c.graph);
             }
-            if del && over {
-                action = Some(MenuAction::Delete);
+            if keys.help {
+                self.show_help = !self.show_help;
             }
-            if bypass && over {
-                action = Some(MenuAction::Bypass);
+            if keys.esc {
+                self.show_help = false;
             }
-            if all && over {
-                self.selected = c.graph.nodes().iter().map(|n| n.id).collect();
+            if over {
+                if keys.del {
+                    action = Some(MenuAction::Delete);
+                }
+                if keys.bypass {
+                    action = Some(MenuAction::Bypass);
+                }
+                if keys.all {
+                    self.selected = c.graph.nodes().iter().map(|n| n.id).collect();
+                }
+                if keys.home {
+                    self.frame_all(c.graph, rect);
+                }
+                if keys.grid {
+                    self.snap = !self.snap;
+                    self.say(
+                        ui,
+                        if self.snap {
+                            "Snap to grid on"
+                        } else {
+                            "Snap to grid off"
+                        },
+                    );
+                }
+                let one = (self.selected.len() == 1)
+                    .then(|| *self.selected.first().unwrap())
+                    .filter(|id| c.graph.node(*id).is_some_and(|n| n.makes_image()));
+                for (pressed, make) in [
+                    (keys.serial, Insert::Serial as fn(NodeId) -> Insert),
+                    (keys.parallel, Insert::Parallel),
+                    (keys.layer, Insert::Layer),
+                ] {
+                    if pressed {
+                        match one {
+                            Some(id) => {
+                                if let Some(n) = c.graph.node(id) {
+                                    self.menu_at = pos2(
+                                        n.pos[0] + NODE_W * 1.5 + 48.0,
+                                        n.pos[1] + HEADER_H * 0.5,
+                                    );
+                                }
+                                self.open_search_with(ui.ctx(), make(id));
+                            }
+                            None => self.say(
+                                ui,
+                                "Select one picture node first (S / P / L add after it).",
+                            ),
+                        }
+                    }
+                }
             }
-            if home && over {
-                self.frame_all(c.graph, rect);
-            }
-            for e in events {
+            for e in keys.events {
                 match e {
-                    egui::Event::Copy => action = Some(MenuAction::Copy),
-                    egui::Event::Cut => action = Some(MenuAction::Cut),
-                    egui::Event::Paste(text) if resp.hovered() || !self.selected.is_empty() => {
+                    egui::Event::Copy if over => action = Some(MenuAction::Copy),
+                    egui::Event::Cut if over => action = Some(MenuAction::Cut),
+                    egui::Event::Paste(text) if over => {
                         self.paste(ui, &mut c, &text, None);
                     }
                     _ => {}
@@ -502,21 +804,71 @@ impl Editor {
 
         // ---- Drawing ----
         painter.rect_filled(rect, 0.0, CANVAS_BG);
-        let step = 24.0 * self.zoom;
-        if step > 6.0 {
+        let step = GRID * self.zoom;
+        if step > 5.0 {
             let o = origin(self);
-            let mut x = rect.left() + (o.x - rect.left()).rem_euclid(step);
+            let first = |o: f32, lo: f32| lo + (o - lo).rem_euclid(step);
+            let mut x = first(o.x, rect.left());
             while x < rect.right() {
-                let mut y = rect.top() + (o.y - rect.top()).rem_euclid(step);
+                let gx = ((x - o.x) / step).round() as i64;
+                let mut y = first(o.y, rect.top());
                 while y < rect.bottom() {
-                    painter.circle_filled(pos2(x, y), 1.0, GRID);
+                    let gy = ((y - o.y) / step).round() as i64;
+                    let major = gx % 8 == 0 && gy % 8 == 0;
+                    painter.circle_filled(
+                        pos2(x, y),
+                        if major { 1.4 } else { 0.9 },
+                        if major { GRID_DOT_MAJOR } else { GRID_DOT },
+                    );
                     y += step;
                 }
                 x += step;
             }
         }
-        let lay: HashMap<NodeId, &Layout> = layouts.iter().map(|(id, l)| (*id, l)).collect();
         let z = self.zoom;
+        // Frames (under everything).
+        for f in c.graph.frames() {
+            let r = Rect::from_min_max(
+                to_screen(self, frame_rect(f).min),
+                to_screen(self, frame_rect(f).max),
+            );
+            let col = rgb(f.colour);
+            painter.rect_filled(r, 6.0, col.gamma_multiply(0.09));
+            painter.rect_stroke(
+                r,
+                6.0,
+                Stroke::new(1.0, col.gamma_multiply(0.45)),
+                StrokeKind::Inside,
+            );
+            let title = Rect::from_min_size(r.min, vec2(r.width(), FRAME_TITLE_H * z));
+            painter.rect_filled(
+                title,
+                CornerRadius {
+                    nw: 6,
+                    ne: 6,
+                    sw: 0,
+                    se: 0,
+                },
+                col.gamma_multiply(0.28),
+            );
+            painter.text(
+                title.left_center() + vec2(10.0 * z, 0.0),
+                Align2::LEFT_CENTER,
+                &f.label,
+                FontId::proportional((13.0 * z).clamp(7.0, 22.0)),
+                TEXT,
+            );
+            // Resize grip.
+            let g = r.max - vec2(5.0, 5.0);
+            for k in 0..3 {
+                let o = 4.0 * k as f32;
+                painter.line_segment(
+                    [g - vec2(10.0 - o, 0.0), g - vec2(0.0, 10.0 - o)],
+                    Stroke::new(1.0, col.gamma_multiply(0.6)),
+                );
+            }
+        }
+        let lay: HashMap<NodeId, &Layout> = layouts.iter().map(|(id, l)| (*id, l)).collect();
         let wire_w = (2.0 * z).clamp(1.0, 3.0);
         for l in c.graph.links() {
             let (Some(a), Some(b)) = (lay.get(&l.from.node), lay.get(&l.to.node())) else {
@@ -531,17 +883,25 @@ impl Editor {
             };
             let Some(to) = to else { continue };
             let mut col = port_colour(*ty);
-            if *ty == PortType::Signal {
-                // Wires glow with their signal.
-                let v = c
-                    .eval
-                    .signal_value(l.from.node)
-                    .unwrap_or(0.0)
-                    .clamp(0.0, 1.0);
-                col = lerp_colour(Color32::from_rgb(40, 80, 140), col, 0.35 + 0.65 * v);
+            let mut w = wire_w;
+            match ty {
+                PortType::Signal => {
+                    // Wires glow with their signal.
+                    let v = c
+                        .eval
+                        .signal_value(l.from.node)
+                        .unwrap_or(0.0)
+                        .clamp(0.0, 1.0);
+                    col = lerp_colour(Color32::from_rgb(40, 80, 140), col, 0.35 + 0.65 * v);
+                }
+                PortType::Trigger => {
+                    let f = self.flash(l.from.node, now);
+                    col = lerp_colour(Color32::from_rgb(120, 70, 30), col, 0.3 + 0.7 * f);
+                    w += 1.5 * f;
+                }
+                _ => {}
             }
-            let on = l.modulation.is_none_or(|m| m.enabled);
-            if !on {
+            if !l.modulation.is_none_or(|m| m.enabled) {
                 col = col.gamma_multiply(0.35);
             }
             wire(
@@ -549,13 +909,13 @@ impl Editor {
                 to_screen(self, *from),
                 to_screen(self, to),
                 col,
-                wire_w,
+                w,
                 z,
             );
         }
         for (id, l) in &layouts {
             let Some(n) = c.graph.node(*id) else { continue };
-            self.draw_node(&painter, &c, n, l, &to_screen);
+            self.draw_node(&painter, &c, n, l, &to_screen, now);
         }
         // The wire being dragged, on top of everything (it may leave the panel).
         if let (Drag::Wire { from, ty }, Some(p)) = (&self.drag, pointer)
@@ -596,19 +956,25 @@ impl Editor {
             painter.text(
                 rect.center(),
                 Align2::CENTER_CENTER,
-                "An empty canvas. Right-click to add your first node,\nor press Shift+Space to search.",
+                "An empty canvas. Right-click to add your first node,\n\
+                 press Shift+Space to search, or right-click → Add starter graph.",
                 FontId::proportional(15.0),
                 TEXT_DIM,
             );
         }
-        // Help line and messages.
-        let now = ui.input(|i| i.time);
+        // Status line: messages, else a hint.
         let line = match &self.message {
-            Some((m, t)) if now - t < 4.0 => (m.clone(), ERROR),
+            Some((m, t)) if now - t < 4.0 => (m.clone(), ACCENT),
             _ => (
-                "Right-click: add node · drag plug → plug: wire · Shift+Space: search · \
-                 scroll: zoom · middle-drag: pan · Del · Ctrl+Z · Ctrl+D bypass · Home: fit"
-                    .to_string(),
+                format!(
+                    "Right-click: add · drag plug→plug: wire · drop a wire on empty space: add + wire · \
+                     S/P/L: insert after selected · Shift+Space: search · ?: all shortcuts{}",
+                    if self.snap {
+                        " · snap on (G)"
+                    } else {
+                        " · snap off (G)"
+                    }
+                ),
                 TEXT_DIM,
             ),
         };
@@ -620,8 +986,20 @@ impl Editor {
             line.1,
         );
 
+        if self.show_help {
+            help_overlay(&painter, rect);
+        }
         self.search_ui(ui, &mut c);
         self.param_pick_ui(ui, &mut c);
+        self.frame_rename_ui(ui, &mut c);
+    }
+
+    /// 1 just after a trigger node fired, fading to 0.
+    fn flash(&self, node: NodeId, now: f64) -> f32 {
+        self.fired
+            .get(&node)
+            .map(|t| (-(now - t) as f32 / 0.15).exp())
+            .unwrap_or(0.0)
     }
 
     fn draw_node(
@@ -631,24 +1009,39 @@ impl Editor {
         n: &Node,
         l: &Layout,
         to_screen: &dyn Fn(&Self, Pos2) -> Pos2,
+        now: f64,
     ) {
         let z = self.zoom;
         let r = Rect::from_min_max(to_screen(self, l.rect.min), to_screen(self, l.rect.max));
+        if !painter.clip_rect().intersects(r.expand(20.0)) {
+            return; // off screen
+        }
         let round = CornerRadius::same((6.0 * z).round().clamp(2.0, 12.0) as u8);
         let dim = if n.bypass { 0.45 } else { 1.0 };
         let cat = category_colour(category(n));
+        let tag = n.colour.map(rgb).unwrap_or(cat);
         let error = c.eval.errors.get(&n.id);
         painter.rect_filled(
             r.translate(vec2(0.0, 3.0 * z)),
             round,
             Color32::from_black_alpha(90),
         );
+        let body = if n.colour.is_some() {
+            lerp_colour(NODE_BG, tag, 0.10)
+        } else {
+            NODE_BG
+        };
         painter.rect_filled(
             r,
             round,
-            NODE_BG.gamma_multiply(if n.bypass { 0.7 } else { 1.0 }),
+            body.gamma_multiply(if n.bypass { 0.7 } else { 1.0 }),
         );
         let head = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H * z));
+        let head_fill = lerp_colour(
+            NODE_HEADER,
+            tag,
+            if n.colour.is_some() { 0.45 } else { 0.14 },
+        );
         painter.rect_filled(
             head,
             CornerRadius {
@@ -657,10 +1050,10 @@ impl Editor {
                 sw: 0,
                 se: 0,
             },
-            NODE_HEADER,
+            head_fill.gamma_multiply(dim),
         );
         painter.rect_filled(
-            Rect::from_min_size(head.min, vec2(3.0 * z, head.height())),
+            Rect::from_min_size(head.min, vec2(4.0 * z, head.height())),
             CornerRadius {
                 nw: round.nw,
                 ..Default::default()
@@ -669,23 +1062,21 @@ impl Editor {
         );
         let font = FontId::proportional((12.5 * z).clamp(6.0, 20.0));
         let small = FontId::proportional((11.0 * z).clamp(5.0, 18.0));
-        let number = format!("{:02}", n.id.0);
         painter.text(
-            head.left_center() + vec2(9.0 * z, 0.0),
+            head.left_center() + vec2(10.0 * z, 0.0),
             Align2::LEFT_CENTER,
-            &number,
+            format!("{:02}", n.id.0),
             font.clone(),
             TEXT_DIM.gamma_multiply(dim),
         );
-        let label = truncate(&n.label, ((NODE_W - 60.0) / 7.0) as usize);
         painter.text(
             head.left_center() + vec2(32.0 * z, 0.0),
             Align2::LEFT_CENTER,
-            label,
+            truncate(&n.label, 17),
             font,
             TEXT.gamma_multiply(dim),
         );
-        let tag = if error.is_some() {
+        let badge = if error.is_some() {
             Some(("⚠", ERROR))
         } else if n.bypass {
             Some(("off", TEXT_DIM))
@@ -694,7 +1085,7 @@ impl Editor {
         } else {
             None
         };
-        if let Some((t, col)) = tag {
+        if let Some((t, col)) = badge {
             painter.text(
                 head.right_center() - vec2(8.0 * z, 0.0),
                 Align2::RIGHT_CENTER,
@@ -704,28 +1095,34 @@ impl Editor {
             );
         }
         let show_labels = z > 0.5;
-        for (_, label, ty, at) in &l.inputs {
+        for (name, label, ty, at) in &l.inputs {
             let p = to_screen(self, *at);
-            port(painter, p, *ty, z, dim);
+            let linked = c.graph.input_link(n.id, name).is_some();
+            port(painter, p, *ty, z, dim, linked);
             if show_labels {
+                let text = if label.is_empty() { name } else { label };
                 painter.text(
                     p + vec2(9.0 * z, 0.0),
                     Align2::LEFT_CENTER,
-                    label,
+                    text,
                     small.clone(),
-                    TEXT_DIM.gamma_multiply(dim),
+                    TEXT_DIM.gamma_multiply(dim * if *ty == PortType::Mask { 0.6 } else { 1.0 }),
                 );
             }
         }
-        for (_, _, ty, at) in &l.outputs {
-            port(painter, to_screen(self, *at), *ty, z, dim);
+        for (name, _, ty, at) in &l.outputs {
+            let linked = c
+                .graph
+                .links()
+                .iter()
+                .any(|k| k.from.node == n.id && &k.from.port == name);
+            port(painter, to_screen(self, *at), *ty, z, dim, linked);
         }
         for (name, label, at) in &l.mods {
             let p = to_screen(self, *at);
-            port(painter, p, PortType::Signal, z, dim);
+            port(painter, p, PortType::Signal, z, dim, true);
             if show_labels {
-                let live = c.eval.live_value(n.id, name);
-                let text = match live {
+                let text = match c.eval.live_value(n.id, name) {
                     Some(v) => format!("~ {label}  {v:.2}"),
                     None => format!("~ {label}"),
                 };
@@ -738,28 +1135,71 @@ impl Editor {
                 );
             }
         }
-        // Signal nodes: a live level bar.
+        // Signal / trigger nodes: a live readout.
         if let Some(v) = c.eval.signal_value(n.id) {
+            let out_ty = n.outputs.first().map(|o| o.ty).unwrap_or(PortType::Signal);
             let y = to_screen(
                 self,
                 l.outputs.first().map(|o| o.3).unwrap_or(l.rect.center()),
             )
             .y;
-            let bar = Rect::from_min_size(
-                pos2(r.left() + 10.0 * z, y - 3.0 * z),
-                vec2(r.width() * 0.55, 6.0 * z),
-            );
-            painter.rect_filled(bar, 2.0, Color32::from_gray(28));
-            let mut f = bar;
-            f.set_width(bar.width() * v.clamp(0.0, 1.0));
-            painter.rect_filled(f, 2.0, port_colour(PortType::Signal));
+            let x0 = r.left() + if n.inputs.is_empty() { 10.0 } else { 70.0 } * z;
+            if out_ty == PortType::Trigger {
+                let f = self.flash(n.id, now);
+                painter.circle_filled(
+                    pos2(x0 + 6.0 * z, y),
+                    5.0 * z,
+                    lerp_colour(Color32::from_gray(45), port_colour(PortType::Trigger), f),
+                );
+            } else {
+                let bar = Rect::from_min_max(
+                    pos2(x0, y - 3.0 * z),
+                    pos2(r.right() - 48.0 * z, y + 3.0 * z),
+                );
+                if bar.width() > 4.0 {
+                    painter.rect_filled(bar, 2.0, Color32::from_gray(26));
+                    let mut f = bar;
+                    f.set_width(bar.width() * v.clamp(0.0, 1.0));
+                    painter.rect_filled(f, 2.0, port_colour(PortType::Signal));
+                }
+                if show_labels {
+                    painter.text(
+                        pos2(r.right() - 12.0 * z, y),
+                        Align2::RIGHT_CENTER,
+                        format!("{v:.2}"),
+                        small.clone(),
+                        TEXT_DIM,
+                    );
+                }
+            }
+        }
+        // Thumbnail of the node's picture.
+        if let Some(t) = l.thumb {
+            let tr = Rect::from_min_max(to_screen(self, t.min), to_screen(self, t.max));
+            painter.rect_filled(tr, 3.0, Color32::BLACK);
+            if let Some(tex) = c.thumbs.get(&n.id) {
+                painter.image(
+                    *tex,
+                    tr,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    Color32::WHITE.gamma_multiply(dim),
+                );
+            } else if show_labels {
+                painter.text(
+                    tr.center(),
+                    Align2::CENTER_CENTER,
+                    if n.bypass { "bypassed" } else { "no picture" },
+                    small.clone(),
+                    TEXT_DIM,
+                );
+            }
         }
         let stroke = if self.selected.contains(&n.id) {
-            Stroke::new(1.5, ACCENT)
+            Stroke::new(2.0, ACCENT)
         } else if error.is_some() {
             Stroke::new(1.0, ERROR)
         } else {
-            Stroke::new(1.0, Color32::from_gray(62))
+            Stroke::new(1.0, Color32::from_gray(58))
         };
         painter.rect_stroke(r, round, stroke, StrokeKind::Outside);
         if let Some(e) = error
@@ -790,28 +1230,36 @@ impl Editor {
             Hit::Node(n) if n == from.node => None,
             Hit::Node(n) => {
                 let node = c.graph.node(n);
-                if ty == PortType::Signal {
-                    if node.is_some_and(|n| n.params.iter().any(|p| p.def.is_modulatable())) {
-                        self.param_pick = Some((from, n, p));
-                    } else {
-                        self.say(ui, "That node has no sliders to drive.");
-                    }
-                    return;
-                }
-                // Picture dropped on a node: first free input that fits (else the first).
                 let fits: Vec<String> = node
                     .map(|nd| {
                         nd.inputs
                             .iter()
-                            .filter(|i| i.ty.accepts(ty))
+                            .filter(|i| {
+                                i.ty.accepts(ty)
+                                    && !(i.ty == PortType::Mask && ty == PortType::Image)
+                            })
                             .map(|i| i.name.clone())
                             .collect()
                     })
                     .unwrap_or_default();
+                if ty == PortType::Signal && fits.is_empty() {
+                    if node.is_some_and(|n| n.params.iter().any(|p| p.def.is_modulatable())) {
+                        self.param_pick = Some((from, n, p));
+                    } else {
+                        self.say(ui, "That node has nothing a signal can drive.");
+                    }
+                    return;
+                }
+                // First free input that fits (else the first).
                 fits.iter()
                     .find(|name| c.graph.input_link(n, name).is_none())
                     .or(fits.first())
                     .map(|name| Endpoint::input(n, name))
+            }
+            Hit::None => {
+                // Dropped on empty space: add a node already wired to it.
+                self.open_search_with(ui.ctx(), Insert::FromWire(from, ty));
+                return;
             }
             _ => None,
         };
@@ -844,12 +1292,16 @@ impl Editor {
             .fixed_pos(at)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(egui::RichText::new("Drive which slider?").strong());
-                    for p in n.params.iter().filter(|p| p.def.is_modulatable()) {
-                        if ui.button(p.def.label()).clicked() {
-                            pick = Some(p.def.name.clone());
-                        }
-                    }
+                    ui.label(egui::RichText::new("Drive which setting?").strong());
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            for p in n.params.iter().filter(|p| p.def.is_modulatable()) {
+                                if ui.button(p.def.label()).clicked() {
+                                    pick = Some(p.def.name.clone());
+                                }
+                            }
+                        });
                     if ui.small_button("Cancel").clicked() {
                         close = true;
                     }
@@ -878,18 +1330,68 @@ impl Editor {
         }
     }
 
+    fn frame_rename_ui(&mut self, ui: &egui::Ui, c: &mut Ctx) {
+        let Some((id, mut text, at)) = self.frame_rename.take() else {
+            return;
+        };
+        let mut done = false;
+        let mut cancel = ui.input(|i| i.key_pressed(Key::Escape));
+        egui::Area::new(Id::unique("frame-rename"))
+            .order(Order::Foreground)
+            .fixed_pos(at)
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(200.0));
+                    r.request_focus();
+                    if r.lost_focus() {
+                        if ui.input(|i| i.key_pressed(Key::Enter)) {
+                            done = true;
+                        } else {
+                            cancel = true;
+                        }
+                    }
+                });
+            });
+        if done {
+            if let Some(f) = c.graph.frame(id) {
+                let _ = c.history.exec(
+                    c.graph,
+                    Command::PutFrame(Frame {
+                        label: text,
+                        ..f.clone()
+                    }),
+                );
+            }
+        } else if !cancel {
+            self.frame_rename = Some((id, text, at));
+        }
+    }
+
     fn search_ui(&mut self, ui: &egui::Ui, c: &mut Ctx) {
         let Some(s) = self.search.as_mut() else {
             return;
         };
         let q = s.text.to_lowercase();
+        let fits = |e: &CatalogueEntry| match &s.insert {
+            Insert::None => true,
+            Insert::Serial(_) => e.category == Category::Effect,
+            Insert::Parallel(_) | Insert::Layer(_) => {
+                matches!(e.category, Category::Source | Category::Effect)
+            }
+            Insert::FromWire(_, ty) => {
+                e.inputs.iter().any(|i| i.accepts(*ty))
+                    || (*ty == PortType::Signal && e.modulatable)
+            }
+        };
         let hits: Vec<&CatalogueEntry> = c
             .catalogue
             .iter()
+            .filter(|e| fits(e))
             .filter(|e| {
                 q.is_empty()
                     || e.label.to_lowercase().contains(&q)
                     || e.category.name().to_lowercase().contains(&q)
+                    || e.description.to_lowercase().contains(&q)
             })
             .collect();
         let (up, down, enter, esc) = ui.input(|i| {
@@ -907,6 +1409,13 @@ impl Editor {
             s.pick = s.pick.saturating_sub(1);
         }
         s.pick = s.pick.min(hits.len().saturating_sub(1));
+        let title = match &s.insert {
+            Insert::None => "Add a node",
+            Insert::Serial(_) => "Insert after (S)",
+            Insert::Parallel(_) => "Add in parallel (P)",
+            Insert::Layer(_) => "Add as a layer on top (L)",
+            Insert::FromWire(..) => "Add a node on this wire",
+        };
         let mut chosen = None;
         let mut close = esc;
         let area = egui::Area::new(Id::unique("node-search"))
@@ -914,26 +1423,32 @@ impl Editor {
             .fixed_pos(s.screen)
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_width(240.0);
+                    ui.set_width(270.0);
+                    ui.label(egui::RichText::new(title).small().color(TEXT_DIM));
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut s.text)
-                            .hint_text("Add a node… (type to search)"),
+                            .hint_text("type to search…")
+                            .desired_width(f32::INFINITY),
                     );
                     if s.focus {
                         te.request_focus();
                         s.focus = false;
                     }
                     egui::ScrollArea::vertical()
-                        .max_height(280.0)
+                        .max_height(300.0)
                         .show(ui, |ui| {
+                            let mut last = None;
                             for (i, e) in hits.iter().enumerate() {
-                                let text = egui::RichText::new(format!(
-                                    "{}   {}",
-                                    e.label,
-                                    e.category.name()
-                                ));
+                                if last != Some(e.category) {
+                                    last = Some(e.category);
+                                    ui.label(
+                                        egui::RichText::new(e.category.name())
+                                            .small()
+                                            .color(category_colour(e.category)),
+                                    );
+                                }
                                 let r = ui
-                                    .selectable_label(i == s.pick, text)
+                                    .selectable_label(i == s.pick, format!("  {}", e.label))
                                     .on_hover_text(&e.description);
                                 if i == s.pick && (up || down) {
                                     r.scroll_to_me(None);
@@ -959,27 +1474,211 @@ impl Editor {
         {
             close = true;
         }
-        let at = s.at;
+        let (at, insert, screen) = (s.at, s.insert.clone(), s.screen);
         if let Some(kind) = chosen {
-            self.add_node(ui, c, &kind, at);
-            close = true;
+            self.search = None;
+            if let Some(id) = self.add_node(ui, c, &kind, at) {
+                self.wire_new(ui, c, id, insert, screen);
+            }
+            return;
         }
         if close {
             self.search = None;
         }
     }
 
-    fn add_node(&mut self, ui: &egui::Ui, c: &mut Ctx, kind: &str, at: Pos2) {
+    /// Wire a freshly added node according to how it was asked for.
+    fn wire_new(&mut self, ui: &egui::Ui, c: &mut Ctx, new: NodeId, insert: Insert, screen: Pos2) {
+        let Some(node) = c.graph.node(new).cloned() else {
+            return;
+        };
+        let first_image = node
+            .inputs
+            .iter()
+            .find(|p| p.ty == PortType::Image)
+            .map(|p| p.name.clone());
+        let image_out = node
+            .outputs
+            .iter()
+            .find(|p| p.ty == PortType::Image)
+            .map(|p| p.name.clone());
+        let mut cmds = Vec::new();
+        match insert {
+            Insert::None => return,
+            Insert::FromWire(from, ty) => {
+                let input = node
+                    .inputs
+                    .iter()
+                    .find(|p| p.ty.accepts(ty) && p.ty != PortType::Mask)
+                    .or_else(|| node.inputs.iter().find(|p| p.ty.accepts(ty)));
+                match input {
+                    Some(p) => cmds.push(Command::Connect(Link::new(
+                        from,
+                        Endpoint::input(new, &p.name),
+                    ))),
+                    None if ty == PortType::Signal => {
+                        self.param_pick = Some((from, new, screen));
+                        return;
+                    }
+                    None => return,
+                }
+            }
+            Insert::Serial(after) => {
+                let (Some(input), Some(out)) = (first_image, image_out) else {
+                    return;
+                };
+                let Some(src_out) = c
+                    .graph
+                    .node(after)
+                    .and_then(|n| n.outputs.iter().find(|p| p.ty == PortType::Image))
+                    .map(|p| p.name.clone())
+                else {
+                    return;
+                };
+                if let Some(a) = c.graph.node(after) {
+                    cmds.push(Command::Move {
+                        node: new,
+                        pos: [a.pos[0] + NODE_W + 48.0, a.pos[1]],
+                    });
+                }
+                // Take over where `after` was going, then feed from it.
+                for l in c.graph.links().iter().filter(|l| {
+                    l.from.node == after
+                        && l.from.port == src_out
+                        && matches!(l.to, Endpoint::Input { .. })
+                }) {
+                    cmds.push(Command::Connect(Link::new(
+                        OutputRef::new(new, &out),
+                        l.to.clone(),
+                    )));
+                }
+                cmds.push(Command::Connect(Link::new(
+                    OutputRef::new(after, &src_out),
+                    Endpoint::input(new, &input),
+                )));
+            }
+            Insert::Parallel(beside) | Insert::Layer(beside) => {
+                let parallel = matches!(insert, Insert::Parallel(_));
+                let Some(out) = image_out else { return };
+                let Some(b) = c.graph.node(beside).cloned() else {
+                    return;
+                };
+                let Some(b_out) = b
+                    .outputs
+                    .iter()
+                    .find(|p| p.ty == PortType::Image)
+                    .map(|p| p.name.clone())
+                else {
+                    return;
+                };
+                let merge_kind = registry::shader_kind("fx_merge.wgsl");
+                let spec = match registry::spec_for(&merge_kind, c.library) {
+                    Ok(s) => s,
+                    Err(e) => return self.say(ui, e),
+                };
+                let mut m = c.graph.new_node(&spec);
+                m.label = if parallel { "Parallel Mix" } else { "Layer" }.into();
+                m.pos = [b.pos[0] + 2.0 * (NODE_W + 48.0), b.pos[1]];
+                if let Some(p) = m.param_mut("mode") {
+                    p.value = ParamValue::Choice(0); // Normal
+                }
+                if let Some(p) = m.param_mut("opacity") {
+                    p.value = ParamValue::Float(if parallel { 0.5 } else { 1.0 });
+                }
+                let mid = m.id;
+                cmds.push(Command::AddNode(Box::new(m)));
+                cmds.push(Command::Move {
+                    node: new,
+                    pos: [b.pos[0] + NODE_W + 48.0, b.pos[1] + 160.0],
+                });
+                // Same input as the node beside it.
+                if let (Some(input), Some(src)) = (
+                    &first_image,
+                    b.inputs
+                        .iter()
+                        .find(|p| p.ty == PortType::Image)
+                        .and_then(|p| c.graph.input_link(beside, &p.name)),
+                ) {
+                    cmds.push(Command::Connect(Link::new(
+                        src.from.clone(),
+                        Endpoint::input(new, input),
+                    )));
+                }
+                // The merge takes over where `beside` was going.
+                for l in c.graph.links().iter().filter(|l| {
+                    l.from.node == beside
+                        && l.from.port == b_out
+                        && matches!(l.to, Endpoint::Input { .. })
+                }) {
+                    cmds.push(Command::Connect(Link::new(
+                        OutputRef::new(mid, registry::IMAGE_OUT),
+                        l.to.clone(),
+                    )));
+                }
+                cmds.push(Command::Connect(Link::new(
+                    OutputRef::new(beside, &b_out),
+                    Endpoint::input(mid, "base"),
+                )));
+                cmds.push(Command::Connect(Link::new(
+                    OutputRef::new(new, &out),
+                    Endpoint::input(mid, "top"),
+                )));
+            }
+        }
+        // Fold into the "add" step so one Ctrl+Z removes the lot.
+        let _ = c.history.undo(c.graph);
+        let add = Command::AddNode(Box::new(node));
+        cmds.insert(0, add);
+        match c.history.exec(c.graph, Command::Batch(cmds)) {
+            Ok(()) => self.selected = BTreeSet::from([new]),
+            Err(e) => {
+                self.say(ui, e.to_string());
+            }
+        }
+    }
+
+    fn add_node(&mut self, ui: &egui::Ui, c: &mut Ctx, kind: &str, at: Pos2) -> Option<NodeId> {
         let spec = match registry::spec_for(kind, c.library) {
             Ok(s) => s,
-            Err(e) => return self.say(ui, e),
+            Err(e) => {
+                self.say(ui, e);
+                return None;
+            }
         };
         let mut n = c.graph.new_node(&spec);
-        n.pos = [at.x - NODE_W * 0.5, at.y - HEADER_H * 0.5];
+        n.pos = [
+            snap(at.x - NODE_W * 0.5, self.snap),
+            snap(at.y - HEADER_H * 0.5, self.snap),
+        ];
         let id = n.id;
         match c.history.exec(c.graph, Command::AddNode(Box::new(n))) {
-            Ok(()) => self.selected = BTreeSet::from([id]),
-            Err(e) => self.say(ui, e.to_string()),
+            Ok(()) => {
+                self.selected = BTreeSet::from([id]);
+                Some(id)
+            }
+            Err(e) => {
+                self.say(ui, e.to_string());
+                None
+            }
+        }
+    }
+
+    fn clip_of_selection(&self, g: &Graph) -> Clip {
+        Clip {
+            nodes: self
+                .selected
+                .iter()
+                .filter_map(|id| g.node(*id).cloned())
+                .collect(),
+            links: g
+                .links()
+                .iter()
+                .filter(|l| {
+                    self.selected.contains(&l.from.node) && self.selected.contains(&l.to.node())
+                })
+                .cloned()
+                .collect(),
+            frames: Vec::new(),
         }
     }
 
@@ -1014,27 +1713,23 @@ impl Editor {
                     let _ = c.history.exec(c.graph, Command::Batch(cmds));
                 }
             }
+            MenuAction::Colour(col) => {
+                let cmds: Vec<Command> = sel
+                    .iter()
+                    .map(|id| Command::SetColour {
+                        node: *id,
+                        colour: col,
+                    })
+                    .collect();
+                if !cmds.is_empty() {
+                    let _ = c.history.exec(c.graph, Command::Batch(cmds));
+                }
+            }
             MenuAction::Copy | MenuAction::Cut => {
                 if sel.is_empty() {
                     return;
                 }
-                let clip = Clip {
-                    nodes: sel
-                        .iter()
-                        .filter_map(|id| c.graph.node(*id).cloned())
-                        .collect(),
-                    links: c
-                        .graph
-                        .links()
-                        .iter()
-                        .filter(|l| {
-                            self.selected.contains(&l.from.node)
-                                && self.selected.contains(&l.to.node())
-                        })
-                        .cloned()
-                        .collect(),
-                };
-                if let Ok(text) = ron::to_string(&clip) {
+                if let Ok(text) = ron::to_string(&self.clip_of_selection(c.graph)) {
                     ui.ctx().copy_text(format!("{CLIP_TAG}{text}"));
                 }
                 if a == MenuAction::Cut {
@@ -1042,33 +1737,18 @@ impl Editor {
                 }
             }
             MenuAction::Duplicate => {
-                let clip = Clip {
-                    nodes: sel
-                        .iter()
-                        .filter_map(|id| c.graph.node(*id).cloned())
-                        .collect(),
-                    links: c
-                        .graph
-                        .links()
-                        .iter()
-                        .filter(|l| {
-                            self.selected.contains(&l.from.node)
-                                && self.selected.contains(&l.to.node())
-                        })
-                        .cloned()
-                        .collect(),
-                };
-                if let Ok(text) = ron::to_string(&clip) {
-                    self.paste(ui, c, &format!("{CLIP_TAG}{text}"), Some(vec2(30.0, 30.0)));
+                if let Ok(text) = ron::to_string(&self.clip_of_selection(c.graph)) {
+                    self.paste(ui, c, &format!("{CLIP_TAG}{text}"), Some(vec2(32.0, 32.0)));
                 }
             }
             MenuAction::Clear => {
-                let cmds = c
+                let mut cmds: Vec<Command> = c
                     .graph
                     .nodes()
                     .iter()
                     .map(|n| Command::RemoveNode(n.id))
                     .collect();
+                cmds.extend(c.graph.frames().iter().map(|f| Command::RemoveFrame(f.id)));
                 let _ = c.history.exec(c.graph, Command::Batch(cmds));
                 self.selected.clear();
             }
@@ -1077,6 +1757,7 @@ impl Editor {
                     let clip = Clip {
                         nodes: g.nodes().to_vec(),
                         links: g.links().to_vec(),
+                        frames: g.frames().to_vec(),
                     };
                     if let Ok(text) = ron::to_string(&clip) {
                         self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
@@ -1084,6 +1765,67 @@ impl Editor {
                 }
                 Err(e) => self.say(ui, e),
             },
+            MenuAction::AddFrame => {
+                let id = c.graph.new_frame_id();
+                let bounds = self
+                    .selected
+                    .iter()
+                    .filter_map(|id| c.graph.node(*id))
+                    .map(|n| layout(c.graph, n, self.thumbnails).rect)
+                    .reduce(|a, b| a.union(b));
+                let r = match bounds {
+                    Some(b) => Rect::from_min_max(
+                        b.min - vec2(GRID * 1.5, FRAME_TITLE_H + GRID),
+                        b.max + vec2(GRID * 1.5, GRID * 1.5),
+                    ),
+                    None => Rect::from_min_size(self.menu_at, vec2(320.0, 200.0)),
+                };
+                let s = self.snap;
+                let f = Frame {
+                    id,
+                    label: "Frame".into(),
+                    rect: [
+                        snap(r.min.x, s),
+                        snap(r.min.y, s),
+                        snap(r.width(), s),
+                        snap(r.height(), s),
+                    ],
+                    colour: TAG_COLOURS[(id as usize + 4) % TAG_COLOURS.len()],
+                };
+                let _ = c.history.exec(c.graph, Command::PutFrame(f));
+            }
+            MenuAction::FrameColour(id, col) => {
+                if let Some(f) = c.graph.frame(id) {
+                    let _ = c.history.exec(
+                        c.graph,
+                        Command::PutFrame(Frame {
+                            colour: col,
+                            ..f.clone()
+                        }),
+                    );
+                }
+            }
+            MenuAction::RenameFrame(id) => {
+                if let Some(f) = c.graph.frame(id) {
+                    let at = ui.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                    self.frame_rename = Some((id, f.label.clone(), at));
+                }
+            }
+            MenuAction::SelectInFrame(id) => {
+                if let Some(f) = c.graph.frame(id) {
+                    let fr = frame_rect(f);
+                    self.selected = c
+                        .graph
+                        .nodes()
+                        .iter()
+                        .filter(|n| fr.contains(layout(c.graph, n, self.thumbnails).rect.center()))
+                        .map(|n| n.id)
+                        .collect();
+                }
+            }
+            MenuAction::RemoveFrame(id) => {
+                let _ = c.history.exec(c.graph, Command::RemoveFrame(id));
+            }
         }
     }
 
@@ -1101,10 +1843,19 @@ impl Editor {
             return;
         }
         let offset = offset.unwrap_or_else(|| {
-            let min = clip.nodes.iter().fold(pos2(f32::MAX, f32::MAX), |m, n| {
-                pos2(m.x.min(n.pos[0]), m.y.min(n.pos[1]))
-            });
-            self.menu_at - min
+            let min = clip
+                .nodes
+                .iter()
+                .map(|n| n.pos)
+                .chain(clip.frames.iter().map(|f| [f.rect[0], f.rect[1]]))
+                .fold(pos2(f32::MAX, f32::MAX), |m, p| {
+                    pos2(m.x.min(p[0]), m.y.min(p[1]))
+                });
+            let to = pos2(
+                snap(self.menu_at.x, self.snap),
+                snap(self.menu_at.y, self.snap),
+            );
+            to - min
         });
         let mut map = HashMap::new();
         let mut cmds = Vec::new();
@@ -1128,6 +1879,19 @@ impl Editor {
             };
             cmds.push(Command::Connect(link));
         }
+        for f in &clip.frames {
+            let id = c.graph.new_frame_id();
+            cmds.push(Command::PutFrame(Frame {
+                id,
+                rect: [
+                    f.rect[0] + offset.x,
+                    f.rect[1] + offset.y,
+                    f.rect[2],
+                    f.rect[3],
+                ],
+                ..f.clone()
+            }));
+        }
         match c.history.exec(c.graph, Command::Batch(cmds)) {
             Ok(()) => self.selected = map.values().copied().collect(),
             Err(e) => self.say(ui, e.to_string()),
@@ -1139,7 +1903,8 @@ impl Editor {
         let Some(b) = g
             .nodes()
             .iter()
-            .map(|n| layout(g, n).rect)
+            .map(|n| layout(g, n, self.thumbnails).rect)
+            .chain(g.frames().iter().map(frame_rect))
             .reduce(|a, b| a.union(b))
         else {
             self.zoom = 1.0;
@@ -1149,9 +1914,25 @@ impl Editor {
         let b = b.expand(40.0);
         self.zoom = (rect.width() / b.width())
             .min(rect.height() / b.height())
-            .clamp(0.3, 1.2);
+            .clamp(0.3, 1.1);
         self.pan = rect.size() * 0.5 - b.center().to_vec2() * self.zoom;
     }
+}
+
+struct Keys {
+    events: Vec<egui::Event>,
+    del: bool,
+    redo: bool,
+    undo: bool,
+    bypass: bool,
+    all: bool,
+    home: bool,
+    serial: bool,
+    parallel: bool,
+    layer: bool,
+    grid: bool,
+    help: bool,
+    esc: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1159,18 +1940,29 @@ enum MenuAction {
     Add(String),
     Delete,
     Bypass,
+    Colour(Option<[u8; 3]>),
     Copy,
     Cut,
     Duplicate,
     Clear,
     Starter,
+    AddFrame,
+    FrameColour(u32, [u8; 3]),
+    RenameFrame(u32),
+    SelectInFrame(u32),
+    RemoveFrame(u32),
 }
 
-fn add_menu(ui: &mut egui::Ui, catalogue: &[CatalogueEntry]) -> Option<MenuAction> {
+fn add_menu(
+    ui: &mut egui::Ui,
+    catalogue: &[CatalogueEntry],
+    selected: usize,
+) -> Option<MenuAction> {
     let mut pick = None;
-    ui.label(egui::RichText::new("Add node").strong());
+    ui.label(egui::RichText::new("Add node").small().color(TEXT_DIM));
     for cat in Category::ALL {
-        ui.menu_button(cat.name(), |ui| {
+        let label = egui::RichText::new(cat.name()).color(category_colour(cat));
+        ui.menu_button(label, |ui| {
             for e in catalogue.iter().filter(|e| e.category == cat) {
                 if ui.button(&e.label).on_hover_text(&e.description).clicked() {
                     pick = Some(MenuAction::Add(e.kind.clone()));
@@ -1179,7 +1971,21 @@ fn add_menu(ui: &mut egui::Ui, catalogue: &[CatalogueEntry]) -> Option<MenuActio
         });
     }
     ui.separator();
-    if ui.button("Paste").clicked() {
+    let frame_label = if selected > 0 {
+        "Frame the selected nodes"
+    } else {
+        "Add a frame here"
+    };
+    if ui
+        .button(frame_label)
+        .on_hover_text(
+            "A coloured backdrop to keep an area tidy. Drag its title to move everything in it.",
+        )
+        .clicked()
+    {
+        pick = Some(MenuAction::AddFrame);
+    }
+    if ui.button("Paste   Ctrl+V").clicked() {
         ui.ctx()
             .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
     }
@@ -1203,9 +2009,40 @@ fn add_menu(ui: &mut egui::Ui, catalogue: &[CatalogueEntry]) -> Option<MenuActio
     pick
 }
 
+fn swatches(ui: &mut egui::Ui, none: bool) -> Option<Option<[u8; 3]>> {
+    let mut pick = None;
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        for c in TAG_COLOURS {
+            let (r, resp) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+            ui.painter().rect_filled(r, 3.0, rgb(c));
+            if resp.hovered() {
+                ui.painter().rect_stroke(
+                    r,
+                    3.0,
+                    Stroke::new(1.5, Color32::WHITE),
+                    StrokeKind::Outside,
+                );
+            }
+            if resp.clicked() {
+                pick = Some(Some(c));
+            }
+        }
+        if none && ui.small_button("none").clicked() {
+            pick = Some(None);
+        }
+    });
+    pick
+}
+
 fn node_menu(ui: &mut egui::Ui, count: usize) -> Option<MenuAction> {
     let mut pick = None;
     let s = if count > 1 { "s" } else { "" };
+    ui.label(egui::RichText::new("Colour").small().color(TEXT_DIM));
+    if let Some(c) = swatches(ui, true) {
+        pick = Some(MenuAction::Colour(c));
+    }
+    ui.separator();
     if ui.button(format!("Bypass{s}   Ctrl+D")).clicked() {
         pick = Some(MenuAction::Bypass);
     }
@@ -1218,6 +2055,9 @@ fn node_menu(ui: &mut egui::Ui, count: usize) -> Option<MenuAction> {
     if ui.button("Cut   Ctrl+X").clicked() {
         pick = Some(MenuAction::Cut);
     }
+    if ui.button("Put in a frame").clicked() {
+        pick = Some(MenuAction::AddFrame);
+    }
     ui.separator();
     if ui.button(format!("Delete node{s}   Del")).clicked() {
         pick = Some(MenuAction::Delete);
@@ -1228,11 +2068,101 @@ fn node_menu(ui: &mut egui::Ui, count: usize) -> Option<MenuAction> {
     pick
 }
 
-fn port(painter: &egui::Painter, p: Pos2, ty: PortType, z: f32, dim: f32) {
+fn frame_menu(ui: &mut egui::Ui, id: u32) -> Option<MenuAction> {
+    let mut pick = None;
+    ui.label(egui::RichText::new("Frame colour").small().color(TEXT_DIM));
+    if let Some(Some(c)) = swatches(ui, false) {
+        pick = Some(MenuAction::FrameColour(id, c));
+    }
+    ui.separator();
+    if ui.button("Rename   (double-click title)").clicked() {
+        pick = Some(MenuAction::RenameFrame(id));
+    }
+    if ui.button("Select the nodes inside").clicked() {
+        pick = Some(MenuAction::SelectInFrame(id));
+    }
+    if ui.button("Remove frame (keeps the nodes)").clicked() {
+        pick = Some(MenuAction::RemoveFrame(id));
+    }
+    if pick.is_some() {
+        ui.close();
+    }
+    pick
+}
+
+/// The `?` sheet: every graph shortcut.
+fn help_overlay(painter: &egui::Painter, rect: Rect) {
+    const ROWS: &[(&str, &str)] = &[
+        ("Right-click", "add a node / node, frame menus"),
+        ("Shift+Space, double-click", "search for a node by name"),
+        ("Drag plug → plug", "connect (only matching types fit)"),
+        ("Drag a wire off an input", "unplug it"),
+        ("Drop a wire on empty space", "add a node already wired"),
+        (
+            "Drop a blue wire on a node",
+            "pick a setting for it to drive",
+        ),
+        ("S", "insert an effect after the selected node"),
+        ("P", "add a parallel branch (50/50 mix)"),
+        ("L", "add a layer on top"),
+        ("Click / Shift+click / drag box", "select"),
+        ("Del", "delete selected"),
+        ("Ctrl+D", "bypass selected"),
+        ("Ctrl+C / X / V", "copy / cut / paste (between graphs too)"),
+        ("Ctrl+Z, Ctrl+Shift+Z", "undo, redo"),
+        ("Ctrl+A", "select all"),
+        ("G", "snap to grid on / off"),
+        ("Scroll, middle-drag", "zoom, pan (or Space/Alt + drag)"),
+        ("Home", "fit everything in view"),
+        ("Tab", "hide / show the graph"),
+        ("?  or  Esc", "close this sheet"),
+    ];
+    let w = 520.0_f32.min(rect.width() - 20.0);
+    let h = (ROWS.len() as f32 * 19.0 + 44.0).min(rect.height() - 10.0);
+    let r = Rect::from_center_size(rect.center(), vec2(w, h));
+    painter.rect_filled(r, 8.0, Color32::from_black_alpha(225));
+    painter.rect_stroke(r, 8.0, Stroke::new(1.0, theme::LINE), StrokeKind::Inside);
+    painter.text(
+        r.left_top() + vec2(16.0, 12.0),
+        Align2::LEFT_TOP,
+        "Node graph shortcuts",
+        FontId::proportional(15.0),
+        ACCENT,
+    );
+    for (i, (k, v)) in ROWS.iter().enumerate() {
+        let y = r.top() + 38.0 + i as f32 * 19.0;
+        if y > r.bottom() - 10.0 {
+            break;
+        }
+        painter.text(
+            pos2(r.left() + 16.0, y),
+            Align2::LEFT_TOP,
+            *k,
+            FontId::proportional(12.5),
+            TEXT,
+        );
+        painter.text(
+            pos2(r.left() + 16.0 + w * 0.44, y),
+            Align2::LEFT_TOP,
+            *v,
+            FontId::proportional(12.5),
+            TEXT_DIM,
+        );
+    }
+}
+
+fn port(painter: &egui::Painter, p: Pos2, ty: PortType, z: f32, dim: f32, linked: bool) {
     let r = (PORT_R * z).clamp(2.5, 8.0);
+    let col = port_colour(ty).gamma_multiply(
+        dim * if ty == PortType::Mask && !linked {
+            0.6
+        } else {
+            1.0
+        },
+    );
     painter.circle_filled(p, r, CANVAS_BG);
-    painter.circle_stroke(p, r, Stroke::new(1.5, port_colour(ty).gamma_multiply(dim)));
-    painter.circle_filled(p, r * 0.45, port_colour(ty).gamma_multiply(dim));
+    painter.circle_stroke(p, r, Stroke::new(1.5, col));
+    painter.circle_filled(p, r * if linked { 0.55 } else { 0.3 }, col);
 }
 
 fn wire(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, w: f32, z: f32) {

@@ -517,6 +517,12 @@ impl Renderer {
     }
 
     /// Has this node drawn at least one frame (so it has a picture to show)?
+    /// The latest picture of a graph node (for thumbnails and the viewer).
+    /// The view changes every frame (ping-pong), so fetch it each frame.
+    pub fn node_view(&self, key: u64) -> Option<&wgpu::TextureView> {
+        self.nodes.get(&key).filter(|t| t.drawn).map(|t| t.latest())
+    }
+
     pub fn has_node(&self, key: u64) -> bool {
         self.nodes.get(&key).is_some_and(|t| t.drawn)
     }

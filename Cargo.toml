@@ -26,7 +26,7 @@ symphonia = { version = "0.6", features = ["mp3", "flac", "ogg", "vorbis", "wav"
 rtrb = "0.4"
 realfft = "3.5"
 triple_buffer = "9"
-eframe = "0.37"
+eframe = { version = "0.37", features = ["persistence"] }
 egui = "0.37"
 rfd = "0.18"
 wgpu = "30"

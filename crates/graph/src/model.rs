@@ -58,6 +58,9 @@ pub struct Node {
     pub bypass: bool,
     #[serde(default)]
     pub resolution: Resolution,
+    /// Colour tag chosen by the user (`None` = the type's own colour).
+    #[serde(default)]
+    pub colour: Option<[u8; 3]>,
 }
 
 impl Node {
@@ -185,6 +188,17 @@ pub struct PublishedParam {
     pub param: String,
 }
 
+/// A coloured, titled area of the graph (a backdrop) for keeping things tidy.
+/// Nodes inside it move with it. Purely visual: it never changes the picture.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Frame {
+    pub id: u32,
+    pub label: String,
+    /// x, y, width, height in graph units.
+    pub rect: [f32; 4],
+    pub colour: [u8; 3],
+}
+
 /// A set of nodes shown as one node. Groups can sit inside other groups
 /// (`parent`); a node belongs to at most one group (the innermost).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -227,6 +241,8 @@ pub enum GraphError {
     AlreadyConnected,
     #[error("there is no such wire")]
     NoSuchLink,
+    #[error("there is no frame {0}")]
+    NoSuchFrame(u32),
     #[error("there is no group {0}")]
     NoSuchGroup(u32),
     #[error("group {0}: {1}")]
@@ -248,6 +264,10 @@ pub struct Graph {
     nodes: Vec<Node>,
     links: Vec<Link>,
     groups: Vec<Group>,
+    #[serde(default)]
+    frames: Vec<Frame>,
+    #[serde(default)]
+    next_frame: u32,
 }
 
 fn format_version() -> u32 {
@@ -269,7 +289,43 @@ impl Graph {
             nodes: Vec::new(),
             links: Vec::new(),
             groups: Vec::new(),
+            frames: Vec::new(),
+            next_frame: 1,
         }
+    }
+
+    pub fn frames(&self) -> &[Frame] {
+        &self.frames
+    }
+
+    pub fn frame(&self, id: u32) -> Option<&Frame> {
+        self.frames.iter().find(|f| f.id == id)
+    }
+
+    /// The next free frame number (reserve it by adding the frame).
+    pub fn new_frame_id(&mut self) -> u32 {
+        self.next_frame = self.next_frame.max(1);
+        let id = self.next_frame;
+        self.next_frame += 1;
+        id
+    }
+
+    /// Add a frame, or replace the one with the same id. Returns the old one.
+    pub(crate) fn put_frame_raw(&mut self, f: Frame) -> Option<Frame> {
+        self.next_frame = self.next_frame.max(f.id + 1);
+        match self.frames.iter().position(|x| x.id == f.id) {
+            Some(i) => Some(std::mem::replace(&mut self.frames[i], f)),
+            None => {
+                let i = self.frames.partition_point(|x| x.id < f.id);
+                self.frames.insert(i, f);
+                None
+            }
+        }
+    }
+
+    pub(crate) fn take_frame(&mut self, id: u32) -> Option<Frame> {
+        let i = self.frames.iter().position(|f| f.id == id)?;
+        Some(self.frames.remove(i))
     }
 
     pub fn nodes(&self) -> &[Node] {
@@ -333,6 +389,7 @@ impl Graph {
             pos: [0.0, 0.0],
             bypass: false,
             resolution: Resolution::Inherit,
+            colour: None,
         }
     }
 
@@ -566,7 +623,14 @@ impl Graph {
             nodes: Vec::new(),
             links: Vec::new(),
             groups: Vec::new(),
+            frames: Vec::new(),
+            next_frame: self.next_frame,
         };
+        for f in self.frames {
+            if f.rect.iter().all(|x| x.is_finite()) {
+                g.put_frame_raw(f);
+            }
+        }
         for n in self.nodes {
             g.insert_node(n)?;
         }

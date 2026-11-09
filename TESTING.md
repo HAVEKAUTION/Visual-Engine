@@ -316,6 +316,60 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M3 part 2 – Workspace, signal nodes, tidy graphs
+
+Run: `cargo run --release -p app`, then open a song or press **🔊 Computer audio**.
+
+Note: your graph from last time is restored, so it won't have the new starter graph.
+To see it: right-click empty graph space → **Add starter graph** (or **Clear graph**
+first; Ctrl+Z undoes that).
+
+**Workspace**
+- [ ] Top toolbar: Media / Inspector / Graph / Signals buttons hide and show the panels.
+      Close and reopen the app: they stay as you left them (also panel sizes).
+- [ ] The strip along the bottom shows six band bars, K / S / H lights flashing on
+      hits, the BPM, four beat dots (one per beat of the bar) and bar/phrase progress.
+- [ ] Left panel has **Media** and **Looks** tabs (Looks is a placeholder until M6).
+
+**Viewer**
+- [ ] The big viewer shows the final output. Click a node: a small picture of *that*
+      node appears top-right (PiP). Click the PiP: the viewer shows that node. Press
+      **V** to go back to the Program.
+- [ ] Press **W** (or Viewer → Wipe): the left part shows the selected node, the right
+      the Program. Drag the line. W again to leave.
+- [ ] Every picture node shows a live thumbnail. Toolbar → Thumbnails turns them off.
+
+**Depth: try these chains** (right-click → Signals / Triggers)
+1. [ ] *Kick punch:* **Audio Trigger** (Kick) → **Envelope** → drop its blue wire on a
+       Transform → Zoom. The picture punches on every kick and eases back.
+2. [ ] *Change every bar:* **Audio Trigger** (Every bar) → **Counter** (Steps 4) →
+       any slider. It steps through four values, one per bar.
+3. [ ] *Tame a signal:* **Audio Signal** (Bass) → **Smooth** (fall 1 s) → **Remap**
+       (from 0–3 to 0–1) → a slider. Smooth and big instead of jittery.
+4. [ ] *Threshold:* **Audio Signal** (Loudness) → **Gate** (threshold 1.5) →
+       **Envelope** → a slider. Only the loud moments fire.
+5. [ ] *Random every 2 beats:* **Random** (Changes per beat 0.5, Smooth off) → a slider.
+- [ ] Trigger nodes show an orange light and their wires flash when they fire.
+
+**Tidy graphs**
+- [ ] Drag nodes: they snap to the grid. **G** turns snapping off/on.
+- [ ] Select a few nodes, right-click empty space → **Frame the selected nodes**. Drag
+      the frame's title: everything inside moves. Drag the bottom-right corner to resize.
+      Double-click the title to rename. Right-click the title for colour / remove.
+- [ ] Right-click a node → pick a colour: its header takes that colour.
+
+**Quicker building**
+- [ ] Select Warehouse Tunnel, press **S**, pick Mirror: Mirror is inserted between the
+      tunnel and the Transform. Ctrl+Z removes it in one go.
+- [ ] Select a picture node, press **L**, pick a Source: a new layer and a Merge appear,
+      already wired. **P** does the same as a 50/50 parallel mix.
+- [ ] Drag a wire from a plug and let go on empty space: the search opens with only
+      nodes that fit; pick one and it's already wired.
+- [ ] Hover a node or a plug: a short explanation. **?**: all the shortcuts.
+
+Known gaps (next part of M3): groups (with published macro knobs) and per-node GPU cost.
+The green Mask plugs do nothing yet (masks come with compositing in M5).
+
 ## v2 M3 part 1 – The node editor
 
 Run: `cargo run --release -p app`
