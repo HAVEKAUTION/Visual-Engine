@@ -1,0 +1,20 @@
+[package]
+name = "app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "visual-engine"
+path = "src/main.rs"
+
+[dependencies]
+audio.workspace = true
+anyhow.workspace = true
+log.workspace = true
+env_logger.workspace = true
+triple_buffer.workspace = true
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true

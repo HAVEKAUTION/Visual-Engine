@@ -1,0 +1,36 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace.dependencies]
+analysis = { path = "crates/analysis" }
+audio = { path = "crates/audio" }
+render = { path = "crates/render" }
+scenes = { path = "crates/scenes" }
+signals = { path = "crates/signals" }
+
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+env_logger = "0.11"
+cpal = "0.18"
+symphonia = { version = "0.6", features = ["mp3", "flac", "ogg", "vorbis", "wav", "pcm"] }
+rtrb = "0.4"
+triple_buffer = "9"
+eframe = "0.37"
+egui = "0.37"
+rfd = "0.18"
+
+# Keep debug builds usable for real-time audio: optimise our code a little and
+# dependencies fully.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
