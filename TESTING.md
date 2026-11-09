@@ -51,3 +51,41 @@ Tick each box when it behaves as described. If something doesn't, note what you 
 - [ ] Unplugging the output or input device shows a red error instead of crashing.
 - [ ] Opening a second song while one plays switches cleanly.
 - [ ] Leave a song playing for 10 minutes: no stutter, no growing lag.
+
+## M1 part 1 – Analysis meters
+
+Open a song you know well (something with a clear kick drum is best). The meter panel
+sits under the waveform; untick "Show signal meters" in the side panel to hide it.
+
+**How to read the meters:** 0 at the bottom, 3 at the top, and the thin white line is
+**1.0 = "typical for this song"**. A white cap on top means the value went above 3.
+Each named band shows two bars: bright = **fast** (punchy), dim = **slow** (the trend).
+
+**Basics**
+- [ ] The status line reads about **93.8 hops/s** while audio is flowing.
+- [ ] `t` counts up in seconds and restarts at 0 when you open a new song or start input.
+- [ ] With nothing playing (or paused), every bar sinks to zero within ~2 seconds.
+
+**Does it match the music?**
+- [ ] **Kick drum** → `sub` and `bass` fast bars jump on every kick; the left (red/orange) mel bars pulse.
+- [ ] **Snare / claps** → `low_mid` and `mid` jump.
+- [ ] **Hi-hats / cymbals** → `air` (and the right-hand violet mel bars) flicker quickly.
+- [ ] Fast bars snap up instantly and fall back within a fraction of a second.
+- [ ] Slow bars move gently and lag a second or so behind.
+- [ ] **Breakdown with no kick** → bass slow bar sinks over a couple of seconds; when the
+      kick returns, bass fast jumps well above the line.
+
+**Auto-gain (1.0 = typical)**
+- [ ] After ~5–10 s of steady music, the bars hover around the white line rather than
+      sitting pinned at the top or bottom. Spiky parts like kicks usually sit at 1–3; that's normal.
+- [ ] A quiet song and a loud song give similar-looking meters after a few seconds, while
+      the **dBFS** number differs a lot.
+- [ ] The **Volume** slider changes what you hear but not the meters.
+
+**Centroid / loudness**
+- [ ] **dBFS**: around −20 to −8 for a typical mastered track, lower for quiet ones.
+- [ ] **Centroid Hz** drops in bass-heavy, muffled parts and rises in bright, hat-heavy
+      parts; the marker on the colour strip and the swatch colour move with it.
+
+**Live input**
+- [ ] Start your mic: talking moves `mid`/`high_mid`; claps and hisses move `air`; silence → zero.

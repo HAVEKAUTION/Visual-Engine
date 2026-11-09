@@ -1,11 +1,13 @@
 //! The main window: side panel with audio sources, central preview area.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
+use std::time::Instant;
 
 use audio::{AudioEngine, InputDevice, Song, Source};
 use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
-use crate::feed_thread::{self, WaveformSnapshot};
+use crate::analysis_thread::{self, WaveformSnapshot};
+use crate::debug_panel;
 
 const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 12);
 const PANEL_BG: Color32 = Color32::from_rgb(20, 20, 26);
@@ -15,6 +17,11 @@ const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 pub struct VisualEngineApp {
     engine: AudioEngine,
     waveform: triple_buffer::Output<WaveformSnapshot>,
+    signals: signals::SignalReader,
+    show_meters: bool,
+    /// For the hops-per-second readout: (hop index, when) of the last sample.
+    hop_rate_mark: (u64, Instant),
+    hops_per_sec: f32,
     loading: Option<(String, Receiver<anyhow::Result<Song>>)>,
     input_devices: Vec<InputDevice>,
     selected_input: Option<usize>,
@@ -26,7 +33,7 @@ pub struct VisualEngineApp {
 }
 
 impl VisualEngineApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, startup_song: Option<std::path::PathBuf>) -> Self {
         cc.egui_ctx.set_theme(egui::Theme::Dark);
         let mut visuals = egui::Visuals::dark();
         visuals.panel_fill = PANEL_BG;
@@ -45,11 +52,16 @@ impl VisualEngineApp {
         let (engine, feeds) = AudioEngine::new();
         let (input, output) = triple_buffer::triple_buffer(&WaveformSnapshot::default());
         // The thread stops by itself when the engine (and its sender) is dropped.
-        let _ = feed_thread::spawn(feeds, input);
+        let (publisher, reader) = signals::bus();
+        let _ = analysis_thread::spawn(feeds, input, publisher);
 
         let mut app = Self {
             engine,
             waveform: output,
+            signals: reader,
+            show_meters: true,
+            hop_rate_mark: (0, Instant::now()),
+            hops_per_sec: 0.0,
             loading: None,
             input_devices: Vec::new(),
             selected_input: None,
@@ -59,6 +71,9 @@ impl VisualEngineApp {
             gpu_info,
         };
         app.rescan_inputs();
+        if let Some(path) = startup_song {
+            app.load_song(path);
+        }
         app
     }
 
@@ -85,14 +100,19 @@ impl VisualEngineApp {
             .add_filter("Audio", audio::decode::SUPPORTED_EXTENSIONS)
             .pick_file();
         if let Some(path) = picked {
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            log::info!("loading {}", path.display());
-            self.error = None;
-            self.loading = Some((name, audio::load_song_in_background(path)));
+            self.load_song(path);
         }
+    }
+
+    /// Start loading a song in the background; it plays when ready.
+    pub fn load_song(&mut self, path: std::path::PathBuf) {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        log::info!("loading {}", path.display());
+        self.error = None;
+        self.loading = Some((name, audio::load_song_in_background(path)));
     }
 
     fn poll_loading(&mut self) {
@@ -140,7 +160,7 @@ impl VisualEngineApp {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.heading("Visual Engine");
-        ui.label(RichText::new("Milestone 0 · app shell").weak());
+        ui.label(RichText::new("Milestone 1 · analysis").weak());
         ui.add_space(12.0);
 
         // ---------------- Song file ----------------
@@ -291,6 +311,11 @@ impl VisualEngineApp {
             );
         }
 
+        ui.add_space(18.0);
+        ui.label(RichText::new("ANALYSIS").strong());
+        ui.separator();
+        ui.checkbox(&mut self.show_meters, "Show signal meters");
+
         if let Some(err) = &self.error {
             ui.add_space(12.0);
             ui.label(RichText::new(err).color(ERROR_COLOR));
@@ -359,7 +384,7 @@ impl VisualEngineApp {
             egui::Align2::LEFT_TOP,
             format!(
                 "Waveform · last {:.0} s · 48 kHz mono feed · peak {:.2}",
-                feed_thread::HISTORY_SECS,
+                analysis_thread::HISTORY_SECS,
                 snap.peak
             ),
             egui::FontId::proportional(13.0),
@@ -373,6 +398,23 @@ impl VisualEngineApp {
                 egui::FontId::proportional(15.0),
                 label_color,
             );
+        }
+    }
+}
+
+impl VisualEngineApp {
+    /// Measure how many analysis hops arrive per second (should be ~93.75).
+    fn update_hop_rate(&mut self, hop_index: u64) {
+        let (last_hop, since) = self.hop_rate_mark;
+        if hop_index < last_hop {
+            // Source changed and the count restarted.
+            self.hop_rate_mark = (hop_index, Instant::now());
+            return;
+        }
+        let elapsed = since.elapsed().as_secs_f32();
+        if elapsed >= 0.5 {
+            self.hops_per_sec = (hop_index - last_hop) as f32 / elapsed;
+            self.hop_rate_mark = (hop_index, Instant::now());
         }
     }
 }
@@ -396,6 +438,18 @@ impl eframe::App for VisualEngineApp {
                     .inner_margin(12.0),
             )
             .show(ui, |ui| self.side_panel(ui));
+
+        if self.show_meters {
+            let frame = self.signals.latest().clone();
+            self.update_hop_rate(frame.hop_index);
+            let rate = self.hops_per_sec;
+            egui::Panel::bottom("signals")
+                .resizable(true)
+                .default_size(300.0)
+                .size_range(200.0..=600.0)
+                .frame(egui::Frame::NONE.fill(PANEL_BG))
+                .show(ui, |ui| debug_panel::show(ui, &frame, rate));
+        }
 
         egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui));
     }

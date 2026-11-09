@@ -5,8 +5,10 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 
 ## Status
 
-**Milestone 0 – app shell** is done: window, load a song or pick a live input,
-playback, and a live waveform of the audio feed that the analysis will use.
+- **M0 – app shell**: done. Window, song playback / live input, live waveform.
+- **M1 part 1 – analysis core**: done. Spectrum, 32 mel + 6 named bands, auto-gain,
+  fast/slow smoothing, centroid, loudness, with a live meter panel.
+- **M1 part 2** (onsets, tempo, beat phase, structure): next.
 
 ## Running it
 
@@ -15,6 +17,8 @@ You need [Rust](https://rustup.rs) (stable). Then, from this folder:
 ```
 cargo run --release
 ```
+
+To open a song straight away: `cargo run --release -- "C:/Music/song.mp3"` (any path works).
 
 The first build downloads and compiles dependencies and takes a few minutes; later
 builds are quick.

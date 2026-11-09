@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [dependencies]
 audio.workspace = true
+analysis.workspace = true
+signals.workspace = true
 anyhow.workspace = true
 log.workspace = true
 env_logger.workspace = true

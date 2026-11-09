@@ -1,15 +1,18 @@
-//! Stand-in for the analysis thread (Milestone 1 replaces the body).
+//! The analysis thread.
 //!
-//! It owns the consumer end of the audio feed, keeps the last couple of seconds
-//! of 48 kHz mono audio and publishes a waveform snapshot through a triple
-//! buffer, so the UI/render thread always reads the newest data without ever
-//! waiting on this thread.
+//! It owns the consumer end of the audio feed, runs every sample through the
+//! [`analysis::Analyzer`] and publishes the newest [`signals::SignalFrame`] on
+//! the Signal Bus. It also keeps the last couple of seconds of audio for the
+//! waveform view. Both are published through triple buffers, so the UI/render
+//! thread always reads the newest data without ever waiting on this thread.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use analysis::{AnalysisConfig, Analyzer};
 use audio::{ANALYSIS_SAMPLE_RATE, FeedConsumer};
+use signals::{SignalFrame, SignalPublisher};
 
 /// How much audio the waveform shows.
 pub const HISTORY_SECS: f32 = 2.0;
@@ -87,21 +90,28 @@ impl History {
 pub fn spawn(
     feeds: Receiver<FeedConsumer>,
     mut output: triple_buffer::Input<WaveformSnapshot>,
+    mut signals: SignalPublisher,
 ) -> JoinHandle<()> {
     std::thread::Builder::new()
         .name("analysis".into())
         .spawn(move || {
             let mut history = History::new((ANALYSIS_SAMPLE_RATE as f32 * HISTORY_SECS) as usize);
+            let mut analyzer = Analyzer::new(AnalysisConfig {
+                sample_rate: ANALYSIS_SAMPLE_RATE,
+                ..Default::default()
+            });
             let mut consumer: Option<FeedConsumer> = None;
             let mut received: u64 = 0;
             let mut last_publish = Instant::now();
 
             loop {
-                // A new source replaces the old feed.
+                // A new source replaces the old feed and starts analysis afresh.
                 match feeds.try_recv() {
                     Ok(c) => {
                         consumer = Some(c);
                         history.clear();
+                        analyzer.reset();
+                        signals.publish(&SignalFrame::default());
                         received = 0;
                     }
                     Err(TryRecvError::Disconnected) => return, // app is closing
@@ -116,8 +126,15 @@ pub fn spawn(
                         let (a, b) = chunk.as_slices();
                         history.extend(a);
                         history.extend(b);
+                        // Every hop is analysed; only the newest frame is published.
+                        let mut new_frame = false;
+                        analyzer.push(a, |_| new_frame = true);
+                        analyzer.push(b, |_| new_frame = true);
                         chunk.commit_all();
                         received += n as u64;
+                        if new_frame {
+                            signals.publish(analyzer.frame());
+                        }
                     }
                 }
 
@@ -165,19 +182,22 @@ mod tests {
     fn thread_publishes_what_the_feed_delivers() {
         let (tx, rx) = std::sync::mpsc::channel();
         let (input, mut output) = triple_buffer::triple_buffer(&WaveformSnapshot::default());
-        let handle = spawn(rx, input);
+        let (publisher, mut reader) = signals::bus();
+        let handle = spawn(rx, input, publisher);
 
         let (mut producer, consumer) = audio::feed::new_feed();
         tx.send(consumer).unwrap();
-        audio::feed::push_slice(&mut producer, &[0.5; 1000]);
+        audio::feed::push_slice(&mut producer, &[0.5; 1024]);
 
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
             let snap = output.read();
-            if snap.samples_received == 1000 {
+            if snap.samples_received == 1024 {
                 assert!((snap.peak - 0.5).abs() < 1e-6);
                 assert_eq!(snap.columns.len(), COLUMNS);
                 assert!(snap.connected);
+                // 1024 samples = exactly two 512-sample hops.
+                assert_eq!(reader.latest().hop_index, 2);
                 break;
             }
             assert!(Instant::now() < deadline, "snapshot never arrived");

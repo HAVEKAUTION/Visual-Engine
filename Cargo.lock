@@ -185,6 +185,10 @@ dependencies = [
 [[package]]
 name = "analysis"
 version = "0.1.0"
+dependencies = [
+ "realfft",
+ "signals",
+]
 
 [[package]]
 name = "android-activity"
@@ -280,6 +284,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "0.1.0"
 dependencies = [
+ "analysis",
  "anyhow",
  "audio",
  "eframe",
@@ -287,6 +292,7 @@ dependencies = [
  "env_logger",
  "log",
  "rfd",
+ "signals",
  "triple_buffer",
 ]
 
@@ -3013,6 +3019,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "realfft"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "538895ccf2006b473aafbe8d72770e21038961ab67aae34f3c577485fc703a7d"
+dependencies = [
+ "rustfft",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3310,6 +3325,9 @@ dependencies = [
 [[package]]
 name = "signals"
 version = "0.1.0"
+dependencies = [
+ "triple_buffer",
+]
 
 [[package]]
 name = "simd-adler32"
