@@ -20,7 +20,7 @@ fn blend(mode: i32, b: vec3<f32>, t: vec3<f32>) -> vec3<f32> {
     let b1 = clamp(b, vec3f(0.0), vec3f(1.0));
     let t1 = clamp(t, vec3f(0.0), vec3f(1.0));
     switch mode {
-        case 1: { return b + t; }
+        case 1: { return min(b1 + t1, vec3f(1.0)); }
         case 2: { return 1.0 - (1.0 - b1) * (1.0 - t1); }
         case 3: { return b * t; }
         case 4: {

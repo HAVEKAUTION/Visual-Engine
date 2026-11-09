@@ -2,6 +2,19 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M2 part 2: the graph runs on the GPU (first visible nodes)
+- New `nodes` crate: node types (every scene and effect file becomes a node, plus Audio
+  Signal, LFO and Program Out) and the evaluator that runs a graph every frame.
+- Signal wires into sliders use the same mapping-rule maths as the modulation editor.
+- Bypassed nodes pass their picture through; a broken node shows a warning and passes
+  its picture through (or keeps its last good frame). The output never stops.
+- The renderer keeps one picture per node and reuses freed textures (texture pool).
+- Merge's Add mode is now clamped (`min(1, B + S)`), as v2 specifies.
+- Temporary **🧪 Node graph test** switch at the top of the scene panel shows a 7-node
+  demo graph, with a bypass tick box per node and live values for signal nodes.
+- Tests: wire maths, demo graph draws and is identical every run (and after save/load),
+  bypass and broken nodes pass through, empty output is black.
+
 ## 2026-11-10 — v2 M2 part 1: graph data model (`graph` crate)
 - New `graph` crate, data only (no GPU, no UI): numbered and labelled nodes, typed plugs
   (Image, Mask, Signal, Trigger), wires checked for type and loops, Signal wires into

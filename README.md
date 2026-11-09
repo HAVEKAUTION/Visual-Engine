@@ -19,8 +19,9 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **Computer audio**: visuals can follow whatever the computer plays (loopback).
 - **Direction v2** (2026-11-10): one node graph at the core, Looks instead of presets.
   See `DIRECTION_UPDATE_v2.md`; the parts above that v2 replaces are listed in `CLAUDE.md`.
-- **v2 M2 – graph engine**: in progress. Part 1 done: the graph data model
-  (`crates/graph`). Next: evaluation on the GPU.
+- **v2 M2 – graph engine**: in progress. Part 1: the graph data model
+  (`crates/graph`). Part 2: GPU evaluation (`crates/nodes`) with a temporary test graph
+  in the app. Next: scenes → nodes rename, modulation unification, autosave.
 
 ## Running it
 
@@ -46,6 +47,7 @@ crates/
   audio/      # song decoding, playback, live input, resampling, analysis feed
   analysis/   # (M1) spectrum, bands, onsets, tempo, beat phase, structure
   graph/      # (v2 M2) node graph data model: typed plugs, wires, groups, undo, save/load
+  nodes/      # (v2 M2) node types + graph evaluator (runs the graph on the GPU)
   signals/    # (M1/M3) Signal Bus and modulation rule
   render/     # (M2) wgpu renderer, layers, feedback buffers, outputs
   scenes/     # (M2) built-in scene shaders

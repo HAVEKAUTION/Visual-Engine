@@ -8,9 +8,11 @@
 //! - [`types`]: port types (Image, Mask, Signal, Trigger), parameters, node specs.
 //! - [`model`]: [`Graph`], [`Node`], [`Link`], [`Group`] and the connection rules.
 //! - [`command`]: every edit as a reversible [`Command`], plus [`History`].
+//! - [`plan`]: which nodes to evaluate, in what order, at what size.
 
 pub mod command;
 pub mod model;
+pub mod plan;
 pub mod types;
 
 pub use command::{Command, History};
@@ -18,6 +20,7 @@ pub use model::{
     Endpoint, Graph, GraphError, Group, GroupId, Link, Node, NodeId, OutputRef, PublishedParam,
     Resolution, WireMod,
 };
+pub use plan::node_size;
 pub use types::{NodeSpec, Param, ParamDef, ParamValue, PortDef, PortType};
 
 #[cfg(test)]

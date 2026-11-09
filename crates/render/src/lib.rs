@@ -17,6 +17,7 @@
 //! blackout, flash), converts to linear and writes an 8-bit sRGB display
 //! texture that the UI shows.
 
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 
 use scenes::{CompiledScene, Target, VERTEX_ENTRY, meta::MAX_BUFFERS};
@@ -100,27 +101,56 @@ impl Tex {
 /// Number of decks (scenes that can be live at once, for crossfades).
 pub const DECKS: usize = 2;
 
-/// One deck's render targets. New textures start out black.
+/// The render targets of one deck or graph node. New textures start black.
 struct DeckTargets {
-    /// Scene output, ping-pong: `output[out_cur]` is the latest frame.
+    size: (u32, u32),
+    /// Output, ping-pong: `output[out_cur]` is the latest frame.
     output: [Tex; 2],
     out_cur: usize,
-    /// Buffers A and B, ping-pong each.
-    bufs: [[Tex; 2]; MAX_BUFFERS],
+    /// Buffers A and B (ping-pong each), created only for scenes that use them.
+    bufs: [Option<[Tex; 2]>; MAX_BUFFERS],
     buf_cur: [usize; MAX_BUFFERS],
+    /// At least one frame has been drawn.
+    drawn: bool,
 }
 
 impl DeckTargets {
-    fn new(device: &wgpu::Device, size: (u32, u32), deck: usize) -> Self {
-        let t = |label: &str| Tex::new(device, &format!("deck {deck} {label}"), size, SCENE_FORMAT);
+    fn new(device: &wgpu::Device, size: (u32, u32), label: &str) -> Self {
+        let t = |l: &str| Tex::new(device, &format!("{label} {l}"), size, SCENE_FORMAT);
         Self {
+            size,
             output: [t("output 0"), t("output 1")],
             out_cur: 0,
-            bufs: [[t("buf_a 0"), t("buf_a 1")], [t("buf_b 0"), t("buf_b 1")]],
+            bufs: [None, None],
             buf_cur: [0; MAX_BUFFERS],
+            drawn: false,
         }
     }
+
+    fn ensure_buffer(&mut self, device: &wgpu::Device, i: usize) {
+        if self.bufs[i].is_none() {
+            let t = |k: usize| Tex::new(device, &format!("buf {i} {k}"), self.size, SCENE_FORMAT);
+            self.bufs[i] = Some([t(0), t(1)]);
+        }
+    }
+
+    fn latest(&self) -> &wgpu::TextureView {
+        &self.output[self.out_cur].view
+    }
 }
+
+/// What a present slot shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Show {
+    Black,
+    /// A deck's latest frame.
+    Deck(usize),
+    /// A graph node's latest frame (key from [`Renderer::render_node`]).
+    Node(u64),
+}
+
+/// Graph-node targets kept for reuse (by size) after a node stops being drawn.
+const POOL_LIMIT: usize = 12;
 
 /// Master controls applied after the decks are mixed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,6 +177,8 @@ impl Default for Master {
 pub struct ScenePipeline {
     passes: Vec<(wgpu::RenderPipeline, Target)>,
     persistent: [bool; MAX_BUFFERS],
+    /// Some pass renders into buffer A / B.
+    uses_buffer: [bool; MAX_BUFFERS],
     params_buf: wgpu::Buffer,
     pub name: String,
 }
@@ -165,6 +197,10 @@ pub struct Renderer {
     master_buf: wgpu::Buffer,
     size: (u32, u32),
     decks: [Option<DeckTargets>; DECKS],
+    /// Graph nodes' targets by key, and which were drawn this frame.
+    nodes: HashMap<u64, DeckTargets>,
+    used: HashSet<u64>,
+    pool: Vec<DeckTargets>,
     display: Option<Tex>,
     /// Bumped whenever the display texture is recreated.
     generation: u64,
@@ -331,6 +367,9 @@ impl Renderer {
             master_buf,
             size: (0, 0),
             decks: [None, None],
+            nodes: HashMap::new(),
+            used: HashSet::new(),
+            pool: Vec::new(),
             display: None,
             generation: 0,
         }
@@ -377,6 +416,13 @@ impl Renderer {
         Ok(ScenePipeline {
             passes,
             persistent: std::array::from_fn(|i| scene.meta.buffer_persistent(i)),
+            uses_buffer: std::array::from_fn(|i| {
+                scene
+                    .meta
+                    .passes
+                    .iter()
+                    .any(|p| scene.meta.pass_target(p) == Ok(Target::Buffer(i)))
+            }),
             params_buf,
             name: scene.meta.name.clone(),
         })
@@ -410,6 +456,8 @@ impl Renderer {
         if self.size != size || self.display.is_none() {
             self.size = size;
             self.decks = [None, None];
+            self.nodes.clear();
+            self.pool.clear();
             self.display = Some(Tex::new(&self.device, "display", size, DISPLAY_FORMAT));
             self.generation += 1;
         }
@@ -420,13 +468,117 @@ impl Renderer {
         if deck >= DECKS || self.display.is_none() {
             return;
         }
-        if self.decks[deck].is_none() {
-            self.decks[deck] = Some(DeckTargets::new(&self.device, self.size, deck));
-        }
-        let Some(t) = self.decks[deck].as_mut() else {
-            return;
+        let mut t = match self.decks[deck].take() {
+            Some(t) => t,
+            None => DeckTargets::new(&self.device, self.size, &format!("deck {deck}")),
         };
+        self.draw(&mut t, scene, signals, params, [None, None]);
+        self.decks[deck] = Some(t);
+    }
 
+    /// Render one graph node into its own targets (kept by `key` across
+    /// frames, so feedback works). `inputs` are the keys of the nodes plugged
+    /// into its picture inputs (`None` = black). Call [`Self::end_frame`] once
+    /// all nodes are drawn.
+    pub fn render_node(
+        &mut self,
+        key: u64,
+        size: (u32, u32),
+        scene: &ScenePipeline,
+        signals: &[u8],
+        params: &[f32],
+        inputs: [Option<u64>; 2],
+    ) {
+        if self.display.is_none() {
+            return;
+        }
+        let size = (size.0.clamp(1, MAX_SIZE), size.1.clamp(1, MAX_SIZE));
+        self.used.insert(key);
+        let mut t = match self.nodes.remove(&key) {
+            Some(t) if t.size == size => t,
+            other => {
+                if let Some(old) = other {
+                    self.pool.push(old);
+                }
+                self.pooled(size, key)
+            }
+        };
+        let views = inputs.map(|k| k.and_then(|k| self.nodes.get(&k)).map(|t| t.latest()));
+        self.draw(&mut t, scene, signals, params, views);
+        self.nodes.insert(key, t);
+    }
+
+    /// Keep a node's last frame alive this frame without drawing (e.g. its
+    /// shader is broken: it keeps showing the last good frame).
+    pub fn keep_node(&mut self, key: u64) {
+        if self.nodes.contains_key(&key) {
+            self.used.insert(key);
+        }
+    }
+
+    /// Has this node drawn at least one frame (so it has a picture to show)?
+    pub fn has_node(&self, key: u64) -> bool {
+        self.nodes.get(&key).is_some_and(|t| t.drawn)
+    }
+
+    /// Release targets of nodes that weren't drawn this frame into the pool.
+    pub fn end_frame(&mut self) {
+        let used = std::mem::take(&mut self.used);
+        let stale: Vec<u64> = self
+            .nodes
+            .keys()
+            .filter(|k| !used.contains(k))
+            .copied()
+            .collect();
+        for k in stale {
+            if let Some(t) = self.nodes.remove(&k) {
+                self.pool.push(t);
+            }
+        }
+        while self.pool.len() > POOL_LIMIT {
+            self.pool.remove(0);
+        }
+    }
+
+    /// Graph-node targets alive and pooled (for tests and stats).
+    pub fn node_target_counts(&self) -> (usize, usize) {
+        (self.nodes.len(), self.pool.len())
+    }
+
+    /// Targets of `size` from the pool (cleared to black), or new ones.
+    fn pooled(&mut self, size: (u32, u32), key: u64) -> DeckTargets {
+        let Some(i) = self.pool.iter().position(|t| t.size == size) else {
+            return DeckTargets::new(&self.device, size, &format!("node {key}"));
+        };
+        let mut t = self.pool.swap_remove(i);
+        let mut enc = self.device.create_command_encoder(&Default::default());
+        for o in &t.output {
+            clear_pass(&mut enc, &o.view);
+        }
+        for b in t.bufs.iter().flatten() {
+            for x in b {
+                clear_pass(&mut enc, &x.view);
+            }
+        }
+        self.queue.submit([enc.finish()]);
+        t.drawn = false;
+        t
+    }
+
+    /// Encode and submit all passes of `scene` into `t`.
+    fn draw(
+        &self,
+        t: &mut DeckTargets,
+        scene: &ScenePipeline,
+        signals: &[u8],
+        params: &[f32],
+        inputs: [Option<&wgpu::TextureView>; 2],
+    ) {
+        for i in 0..MAX_BUFFERS {
+            if scene.uses_buffer[i] {
+                t.ensure_buffer(&self.device, i);
+            }
+        }
         self.queue.write_buffer(&self.signal_buf, 0, signals);
         let params_bytes: Vec<u8> = params.iter().flat_map(|v| v.to_ne_bytes()).collect();
         let n = (params_bytes.len() as u64).min(scene.params_buf.size());
@@ -441,15 +593,18 @@ impl Renderer {
 
         // What each buffer reads as right now: last frame's contents if
         // persistent, black if not. Updated as passes write them.
-        let mut latest: [Option<usize>; MAX_BUFFERS] =
-            std::array::from_fn(|i| scene.persistent[i].then_some(t.buf_cur[i]));
+        let mut latest: [Option<usize>; MAX_BUFFERS] = std::array::from_fn(|i| {
+            (scene.persistent[i] && t.bufs[i].is_some()).then_some(t.buf_cur[i])
+        });
         let prev_out = t.out_cur;
         let next_out = 1 - t.out_cur;
+        let in_a = inputs[0].unwrap_or(&self.black.view);
+        let in_b = inputs[1].unwrap_or(&self.black.view);
 
         for (pipeline, target) in &scene.passes {
-            let buf_view = |i: usize| match latest[i] {
-                Some(k) => &t.bufs[i][k].view,
-                None => &self.black.view,
+            let buf_view = |i: usize| match (latest[i], &t.bufs[i]) {
+                (Some(k), Some(b)) => &b[k].view,
+                _ => &self.black.view,
             };
             let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("scene"),
@@ -471,27 +626,11 @@ impl Renderer {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&t.output[prev_out].view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::TextureView(buf_view(0)),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::TextureView(buf_view(1)),
-                    },
-                    // Effect picture inputs: wired up by the node graph (next step).
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::TextureView(&self.black.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::TextureView(&self.black.view),
-                    },
+                    tex_entry(3, &t.output[prev_out].view),
+                    tex_entry(4, buf_view(0)),
+                    tex_entry(5, buf_view(1)),
+                    tex_entry(6, in_a),
+                    tex_entry(7, in_b),
                 ],
             });
             // Write into the copy that isn't being read.
@@ -499,7 +638,10 @@ impl Renderer {
                 Target::Output => (&t.output[next_out].view, None),
                 Target::Buffer(i) => {
                     let k = 1 - latest[*i].unwrap_or(t.buf_cur[*i]);
-                    (&t.bufs[*i][k].view, Some((*i, k)))
+                    match &t.bufs[*i] {
+                        Some(b) => (&b[k].view, Some((*i, k))),
+                        None => continue,
+                    }
                 }
             };
             {
@@ -529,11 +671,34 @@ impl Renderer {
             }
         }
         t.out_cur = next_out;
+        t.drawn = true;
         self.queue.submit([enc.finish()]);
     }
 
-    /// Mix the decks into the display texture.
+    fn show_view(&self, s: Show) -> &wgpu::TextureView {
+        match s {
+            Show::Black => &self.black.view,
+            Show::Deck(i) => self
+                .decks
+                .get(i)
+                .and_then(|d| d.as_ref())
+                .map_or(&self.black.view, |t| t.latest()),
+            Show::Node(k) => self
+                .nodes
+                .get(&k)
+                .filter(|t| t.drawn)
+                .map_or(&self.black.view, |t| t.latest()),
+        }
+    }
+
+    /// Mix the two decks into the display texture.
     pub fn present(&mut self, master: Master) {
+        self.present_from([Show::Deck(0), Show::Deck(1)], master);
+    }
+
+    /// Mix two sources (`master.mix_b` = 0: first, 1: second) into the
+    /// display texture, with the master controls.
+    pub fn present_from(&mut self, sources: [Show; 2], master: Master) {
         let Some(display) = &self.display else {
             return;
         };
@@ -551,17 +716,11 @@ impl Renderer {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(deck_view(
-                        &self.decks[0],
-                        &self.black.view,
-                    )),
+                    resource: wgpu::BindingResource::TextureView(self.show_view(sources[0])),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::TextureView(deck_view(
-                        &self.decks[1],
-                        &self.black.view,
-                    )),
+                    resource: wgpu::BindingResource::TextureView(self.show_view(sources[1])),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
@@ -655,14 +814,10 @@ impl Renderer {
     }
 }
 
-/// A deck's latest output, or black if it has none.
-fn deck_view<'a>(
-    d: &'a Option<DeckTargets>,
-    black: &'a wgpu::TextureView,
-) -> &'a wgpu::TextureView {
-    match d {
-        Some(t) => &t.output[t.out_cur].view,
-        None => black,
+fn tex_entry(binding: u32, view: &wgpu::TextureView) -> wgpu::BindGroupEntry<'_> {
+    wgpu::BindGroupEntry {
+        binding,
+        resource: wgpu::BindingResource::TextureView(view),
     }
 }
 

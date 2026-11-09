@@ -316,6 +316,32 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M2 part 2 – First visible node graph
+
+Run: `cargo run --release -p app`
+
+- [ ] At the top of the right-hand scene panel there is a **🧪 Node graph test** button.
+      Click it: the picture changes to the Warehouse Tunnel blended (Screen) over Aurora
+      Drift, and the panel shows NODES (01–07) and WIRES.
+- [ ] Play music. The tunnel picture pulses bigger on the bass (that's the Audio Signal
+      node wired into Transform's zoom) and slowly turns.
+- [ ] Every 8 beats the tunnel fades a bit and comes back (the LFO wired into Merge's
+      opacity). The bars next to "05 Audio Signal" and "06 LFO" move.
+- [ ] Untick **02 Transform**: the tunnel stops turning/pulsing (bypassed, picture passes
+      straight through). Tick it again: back.
+- [ ] Untick **04 Merge**: only the Aurora (background) shows. Untick **03 Aurora
+      Drift** instead: only the tunnel shows.
+- [ ] Untick **01 Warehouse Tunnel**: only the Aurora shows, no crash.
+- [ ] Intensity / blackout / flash keys still work while the graph shows.
+- [ ] Click the button again: the normal scene and presets come back as before.
+- [ ] Optional: open `crates/scenes/shaders/fx_transform.wgsl`, break it (type `xx`
+      somewhere) and save. The picture keeps going and 02 shows a ⚠ message. Undo your
+      change and save: the warning goes away.
+- [ ] `cargo test -p nodes` ends with **3 passed** (GPU tests) and **1 passed**.
+
+Not yet: you can't add, move or wire nodes yourself. That is the node editor (next
+milestone, M3). The test graph isn't saved.
+
 ## v2 M2 part 1 – Graph data model (no visible change)
 
 This step only adds the graph's "brain" (what can connect to what, undo, saving).

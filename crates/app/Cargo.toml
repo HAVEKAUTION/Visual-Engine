@@ -22,3 +22,5 @@ egui.workspace = true
 rfd.workspace = true
 render.workspace = true
 scenes.workspace = true
+graph.workspace = true
+nodes.workspace = true
