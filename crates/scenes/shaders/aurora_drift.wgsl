@@ -3,12 +3,13 @@
   "author": "Visual Engine",
   "style": "calm / slow",
   "genres": ["Ambient", "Acoustic", "Downtempo", "Classical"],
+  "palette": ["#2bff88", "#00d0c0", "#3a7bff", "#a45cff", "#ff5cc8"],
   "description": "Northern-light curtains rippling over dark mountains under a starry sky. Loudness sets how fast the curtains flow, each part of the curtain glows with its own slice of the spectrum, and the colour shifts with the brightness of the sound. Made for slow and quiet music.",
   "inputs": [
     { "name": "flow_speed", "label": "Flow speed",  "type": "float", "min": 0,   "max": 1,    "default": 0.12 },
     { "name": "brightness", "label": "Brightness",  "type": "float", "min": 0.3, "max": 2,    "default": 1.0 },
     { "name": "height",     "label": "Height",      "type": "float", "min": 0,   "max": 1,    "default": 0.5 },
-    { "name": "hue_base",   "label": "Colour",      "type": "float", "min": 0,   "max": 1,    "default": 0.36 },
+    { "name": "hue_base",   "label": "Colour shift", "type": "float", "min": 0,   "max": 1,    "default": 0.0 },
     { "name": "stars",      "label": "Stars",       "type": "float", "min": 0,   "max": 1,    "default": 0.6 },
     { "name": "trails",     "label": "Silkiness",   "type": "float", "min": 0,   "max": 0.97, "default": 0.85 }
   ],
@@ -42,8 +43,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let curtain = smoothstep(-0.03, 0.01, above) * exp(-max(above, 0.0) * (1.4 + 0.6 * fi));
         let rays = 0.55 + 0.45 * noise2(vec2f(x * 18.0 + params.flow * 0.6 + params.shimmer, fi * 5.0));
         let band = 1.0 - exp(-0.7 * mel_at(fract(abs(xy.x) / max(audio.aspect, 0.01) * 0.9 + fi * 0.15)));
-        let hue = params.hue_base + 0.08 * fi + 0.12 * audio.centroid_hue_slow + 0.25 * max(above, 0.0);
-        let c = hsv2rgb(vec3f(hue, 0.75, 1.0));
+        // Low edge = start of the palette, rays climb through it.
+        let hue = params.hue_base + 0.08 * fi + 0.12 * audio.centroid_hue_slow + 0.3 * max(above, 0.0);
+        let c = pal(hue * 0.999);
         col += c * curtain * rays * (0.15 + 0.6 * band) * params.brightness * (0.7 - 0.15 * fi);
     }
 

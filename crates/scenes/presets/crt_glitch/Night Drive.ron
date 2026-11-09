@@ -1,0 +1,9 @@
+(
+    name: "Night Drive",
+    scene: "crt_glitch.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

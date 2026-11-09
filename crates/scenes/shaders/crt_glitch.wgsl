@@ -3,6 +3,7 @@
   "author": "Visual Engine",
   "style": "retro / glitch",
   "genres": ["Synthwave", "Electro", "Glitch Hop"],
+  "palette": ["#f2597f", "#ff2e88", "#ffd23f", "#1b0a3a", "#30e3ff"],
   "description": "A neon synthwave horizon (grid floor, striped sun, spectrum skyline) shown on a worn CRT. Snares tear the picture into displaced blocks with RGB split; drops flash and smash it.",
   "inputs": [
     { "name": "drive_speed",  "label": "Grid speed",          "type": "float", "min": 0,   "max": 3,   "default": 0.6 },
@@ -42,14 +43,14 @@ fn fs_scene(in: VsOut) -> @location(0) vec4<f32> {
     let h = xy.y - HORIZON;
 
     // --- Sky -------------------------------------------------------------
-    var sky = mix(vec3<f32>(0.95, 0.35, 0.45), vec3<f32>(0.06, 0.02, 0.16), smoothstep(0.0, 0.9, h));
+    var sky = mix(pal_color(0), pal_color(3), smoothstep(0.0, 0.9, h));
     sky *= 0.55;
 
     // Striped sun, breathing with the bass.
     let sun_c = vec2<f32>(0.0, HORIZON + 0.42);
     let sun_r = 0.36 * (1.0 + 0.06 * kick + 0.04 * clamp(audio.bass_slow - 1.0, -1.0, 1.0));
     let ds = length(xy - sun_c) - sun_r;
-    let sun_col = mix(vec3<f32>(1.0, 0.25, 0.55), vec3<f32>(1.0, 0.85, 0.3), smoothstep(-0.3, 0.35, xy.y - sun_c.y));
+    let sun_col = mix(pal_color(1), pal_color(2), smoothstep(-0.3, 0.35, xy.y - sun_c.y));
     // Horizontal cuts in the lower half that scroll downward.
     let sy = (sun_c.y - xy.y) / sun_r; // 0 at centre, 1 at bottom
     let cut = step(0.0, sy) * step(fract(sy * 7.0 - params.sun_scroll * 3.0), sy * 0.6);
@@ -62,8 +63,8 @@ fn fs_scene(in: VsOut) -> @location(0) vec4<f32> {
     let mtn = 0.04 + 0.22 * (1.0 - exp(-0.6 * mel_at(sx * 0.8)));
     let in_mtn = 1.0 - smoothstep(0.0, 0.004, h - mtn);
     let edge = 1.0 - smoothstep(0.0, 0.006, abs(h - mtn));
-    sky = mix(sky, vec3<f32>(0.03, 0.0, 0.08), in_mtn);
-    sky += vec3<f32>(0.2, 0.9, 1.0) * edge * 0.8;
+    sky = mix(sky, pal_color(3) * 0.4, in_mtn);
+    sky += pal_color(4) * edge * 0.8;
 
     // --- Grid floor (perspective) -------------------------------------
     let d = max(-h, 1e-3);
@@ -73,9 +74,9 @@ fn fs_scene(in: VsOut) -> @location(0) vec4<f32> {
     let w = clamp(0.06 * z, 0.02, 0.45);
     let lines = max(grid_line(gx, w), grid_line(gz, w));
     let fade = exp(-0.08 * z);
-    let neon = mix(vec3<f32>(1.0, 0.2, 0.8), vec3<f32>(0.2, 0.9, 1.0), 0.5 + 0.5 * sin(params.drive * 0.3));
-    var floor_col = vec3<f32>(0.04, 0.0, 0.08) + neon * lines * fade * (0.7 + 0.8 * kick);
-    floor_col += vec3<f32>(0.6, 0.2, 0.5) * exp(-d * 18.0) * 0.6; // horizon haze
+    let neon = mix(pal_color(1), pal_color(4), 0.5 + 0.5 * sin(params.drive * 0.3));
+    var floor_col = pal_color(3) * 0.35 + neon * lines * fade * (0.7 + 0.8 * kick);
+    floor_col += pal_color(0) * exp(-d * 18.0) * 0.4; // horizon haze
 
     let col = select(floor_col, sky, h > 0.0);
     return vec4<f32>(col, 1.0);

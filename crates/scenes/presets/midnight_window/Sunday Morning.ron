@@ -1,0 +1,15 @@
+(
+    name: "Sunday Morning",
+    scene: "midnight_window.wgsl",
+    values: {
+        "warmth": [0.9],
+        "rain": [0.2],
+        "drift_speed": [0.08],
+    },
+    mods: {
+        "bokeh_size": [
+            (source: Signal("kick_age"), shape: Envelope(decay: 0.4), depth: 0.1, enabled: true),
+        ],
+    },
+    palette: Named("Pastel"),
+)

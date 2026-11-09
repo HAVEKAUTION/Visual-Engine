@@ -1,0 +1,15 @@
+(
+    name: "Red Room",
+    scene: "warehouse_tunnel.wgsl",
+    values: {
+        "accent_amt": [0.3],
+        "waves": [0.4],
+        "core_glow": [1.0],
+    },
+    mods: {
+        "speed": [
+            (source: Signal("build_amount"), shape: Linear, depth: 0.3, enabled: true),
+        ],
+    },
+    palette: Named("Blood"),
+)

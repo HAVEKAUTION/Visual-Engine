@@ -11,8 +11,11 @@
 //! | 4, 5    | `buf_a/b`    | off-screen buffers (ping-pong when persistent) |
 //!
 //! Scenes render into 16-bit float textures in display (sRGB-like) space, the
-//! way Shadertoy-style shaders expect. A final pass converts to linear and
-//! writes an 8-bit sRGB "display" texture that the UI shows.
+//! way Shadertoy-style shaders expect. There are two **decks**, each with its
+//! own feedback buffers, so one scene can crossfade into another. A final
+//! "present" pass mixes the decks, applies the master controls (brightness /
+//! blackout, flash), converts to linear and writes an 8-bit sRGB display
+//! texture that the UI shows.
 
 use std::num::NonZeroU64;
 
@@ -26,8 +29,11 @@ pub const DISPLAY_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormS
 pub const MAX_SIZE: u32 = 4096;
 
 const PRESENT_WGSL: &str = r#"
-@group(0) @binding(0) var src: texture_2d<f32>;
-@group(0) @binding(1) var smp: sampler;
+@group(0) @binding(0) var deck_a: texture_2d<f32>;
+@group(0) @binding(1) var deck_b: texture_2d<f32>;
+@group(0) @binding(2) var smp: sampler;
+struct Master { mix_b: f32, gain: f32, flash: f32, _pad: f32 };
+@group(0) @binding(3) var<uniform> master: Master;
 
 struct VsOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
 
@@ -50,7 +56,10 @@ fn to_linear(c: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    let c = clamp(textureSampleLevel(src, smp, in.uv, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let a = clamp(textureSampleLevel(deck_a, smp, in.uv, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let b = clamp(textureSampleLevel(deck_b, smp, in.uv, 0.0).rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    var c = mix(a, b, master.mix_b) * master.gain + vec3<f32>(master.flash);
+    c = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
     return vec4<f32>(to_linear(c), 1.0);
 }
 "#;
@@ -88,28 +97,48 @@ impl Tex {
     }
 }
 
-/// Render targets at one size. New textures start out black.
-struct Targets {
-    size: (u32, u32),
+/// Number of decks (scenes that can be live at once, for crossfades).
+pub const DECKS: usize = 2;
+
+/// One deck's render targets. New textures start out black.
+struct DeckTargets {
     /// Scene output, ping-pong: `output[out_cur]` is the latest frame.
     output: [Tex; 2],
     out_cur: usize,
     /// Buffers A and B, ping-pong each.
     bufs: [[Tex; 2]; MAX_BUFFERS],
     buf_cur: [usize; MAX_BUFFERS],
-    display: Tex,
 }
 
-impl Targets {
-    fn new(device: &wgpu::Device, size: (u32, u32)) -> Self {
-        let t = |label: &str| Tex::new(device, label, size, SCENE_FORMAT);
+impl DeckTargets {
+    fn new(device: &wgpu::Device, size: (u32, u32), deck: usize) -> Self {
+        let t = |label: &str| Tex::new(device, &format!("deck {deck} {label}"), size, SCENE_FORMAT);
         Self {
-            size,
             output: [t("output 0"), t("output 1")],
             out_cur: 0,
             bufs: [[t("buf_a 0"), t("buf_a 1")], [t("buf_b 0"), t("buf_b 1")]],
             buf_cur: [0; MAX_BUFFERS],
-            display: Tex::new(device, "display", size, DISPLAY_FORMAT),
+        }
+    }
+}
+
+/// Master controls applied after the decks are mixed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Master {
+    /// 0 = deck 0 only, 1 = deck 1 only.
+    pub mix_b: f32,
+    /// Brightness multiplier (0 = blackout).
+    pub gain: f32,
+    /// Added white, 0..1.
+    pub flash: f32,
+}
+
+impl Default for Master {
+    fn default() -> Self {
+        Self {
+            mix_b: 0.0,
+            gain: 1.0,
+            flash: 0.0,
         }
     }
 }
@@ -133,7 +162,10 @@ pub struct Renderer {
     signal_buf: wgpu::Buffer,
     present_pipeline: wgpu::RenderPipeline,
     present_layout: wgpu::BindGroupLayout,
-    targets: Option<Targets>,
+    master_buf: wgpu::Buffer,
+    size: (u32, u32),
+    decks: [Option<DeckTargets>; DECKS],
+    display: Option<Tex>,
     /// Bumped whenever the display texture is recreated.
     generation: u64,
 }
@@ -246,7 +278,12 @@ impl Renderer {
 
         let present_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("present"),
-            entries: &[texture_entry(0), sampler_entry(1)],
+            entries: &[
+                texture_entry(0),
+                texture_entry(1),
+                sampler_entry(2),
+                uniform_entry(3),
+            ],
         });
         let present_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("present"),
@@ -267,6 +304,13 @@ impl Renderer {
             DISPLAY_FORMAT,
         );
 
+        let master_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("master"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
         // Clear the 1×1 black texture (wgpu zero-fills it anyway; be explicit).
         let mut enc = device.create_command_encoder(&Default::default());
         clear_pass(&mut enc, &black.view);
@@ -282,7 +326,10 @@ impl Renderer {
             signal_buf,
             present_pipeline,
             present_layout,
-            targets: None,
+            master_buf,
+            size: (0, 0),
+            decks: [None, None],
+            display: None,
             generation: 0,
         }
     }
@@ -333,40 +380,48 @@ impl Renderer {
         })
     }
 
-    /// Forget all feedback (next frame starts from black).
-    pub fn clear_feedback(&mut self) {
-        self.targets = None;
+    /// Forget a deck's feedback (its next frame starts from black).
+    pub fn clear_feedback(&mut self, deck: usize) {
+        if let Some(d) = self.decks.get_mut(deck) {
+            *d = None;
+        }
     }
 
-    /// The texture to show, if a frame has been rendered.
+    /// The texture to show, if a frame has been presented.
     pub fn display_view(&self) -> Option<&wgpu::TextureView> {
-        self.targets.as_ref().map(|t| &t.display.view)
+        self.display.as_ref().map(|t| &t.view)
     }
 
-    /// Changes whenever [`Self::display_view`] is a new texture (after a resize
-    /// or [`Self::clear_feedback`]).
+    /// Changes whenever [`Self::display_view`] is a new texture (after a resize).
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
     pub fn size(&self) -> Option<(u32, u32)> {
-        self.targets.as_ref().map(|t| t.size)
+        self.display.as_ref().map(|_| self.size)
     }
 
-    /// Render one frame of `scene` at `size` pixels.
-    pub fn render(
-        &mut self,
-        scene: &ScenePipeline,
-        signals: &[u8],
-        params: &[f32],
-        size: (u32, u32),
-    ) {
+    /// Start a frame at `size` pixels. A new size recreates every target
+    /// (feedback restarts from black).
+    pub fn begin_frame(&mut self, size: (u32, u32)) {
         let size = (size.0.clamp(1, MAX_SIZE), size.1.clamp(1, MAX_SIZE));
-        if self.targets.as_ref().is_none_or(|t| t.size != size) {
-            self.targets = Some(Targets::new(&self.device, size));
+        if self.size != size || self.display.is_none() {
+            self.size = size;
+            self.decks = [None, None];
+            self.display = Some(Tex::new(&self.device, "display", size, DISPLAY_FORMAT));
             self.generation += 1;
         }
-        let Some(t) = self.targets.as_mut() else {
+    }
+
+    /// Render one frame of `scene` on `deck` (call [`Self::begin_frame`] first).
+    pub fn render(&mut self, deck: usize, scene: &ScenePipeline, signals: &[u8], params: &[f32]) {
+        if deck >= DECKS || self.display.is_none() {
+            return;
+        }
+        if self.decks[deck].is_none() {
+            self.decks[deck] = Some(DeckTargets::new(&self.device, self.size, deck));
+        }
+        let Some(t) = self.decks[deck].as_mut() else {
             return;
         };
 
@@ -463,27 +518,60 @@ impl Renderer {
             }
         }
         t.out_cur = next_out;
+        self.queue.submit([enc.finish()]);
+    }
 
-        // Present: scene output → display texture.
+    /// Mix the decks into the display texture.
+    pub fn present(&mut self, master: Master) {
+        let Some(display) = &self.display else {
+            return;
+        };
+        let m = [
+            master.mix_b.clamp(0.0, 1.0),
+            master.gain.max(0.0),
+            master.flash.max(0.0),
+            0.0,
+        ];
+        let bytes: Vec<u8> = m.iter().flat_map(|v| v.to_ne_bytes()).collect();
+        self.queue.write_buffer(&self.master_buf, 0, &bytes);
         let bind = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("present"),
             layout: &self.present_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&t.output[next_out].view),
+                    resource: wgpu::BindingResource::TextureView(deck_view(
+                        &self.decks[0],
+                        &self.black.view,
+                    )),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: wgpu::BindingResource::TextureView(deck_view(
+                        &self.decks[1],
+                        &self.black.view,
+                    )),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: self.master_buf.as_entire_binding(),
                 },
             ],
         });
+        let mut enc = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("present"),
+            });
         {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("present"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &t.display.view,
+                    view: &display.view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -506,8 +594,8 @@ impl Renderer {
     /// Copy the display texture back to the CPU as tightly packed RGBA8
     /// (sRGB). Blocks until the GPU is done; for tests and screenshots.
     pub fn read_display(&self) -> Option<(u32, u32, Vec<u8>)> {
-        let t = self.targets.as_ref()?;
-        let (w, h) = t.size;
+        let display = self.display.as_ref()?;
+        let (w, h) = self.size;
         let row = w * 4;
         let padded =
             row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
@@ -520,7 +608,7 @@ impl Renderer {
         let mut enc = self.device.create_command_encoder(&Default::default());
         enc.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
-                texture: &t.display.texture,
+                texture: &display.texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -553,6 +641,17 @@ impl Renderer {
             out.extend_from_slice(&data[start..start + row as usize]);
         }
         Some((w, h, out))
+    }
+}
+
+/// A deck's latest output, or black if it has none.
+fn deck_view<'a>(
+    d: &'a Option<DeckTargets>,
+    black: &'a wgpu::TextureView,
+) -> &'a wgpu::TextureView {
+    match d {
+        Some(t) => &t.output[t.out_cur].view,
+        None => black,
     }
 }
 

@@ -2,6 +2,19 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — M3: modulation, presets, colour palettes, performance keys
+- Every slider has a **~** button: link it to the music (any signal), a beat-synced
+  LFO, a macro knob or a slow random wander, shaped as curve / beat envelope / phase
+  pulse / LFO / steps. Uses the mapping rule from the brief; the orange marker shows the
+  live value.
+- Colour palettes: every scene has 5 colours. Pick the scene's own, one of 12 built-in
+  palettes, or your own colours, live.
+- Presets: save / load / delete, stored as files in `crates/scenes/presets`, 2–3 examples
+  for seven scenes. Keys 1–9 crossfade to the preset on that key (length in beats).
+- Performance keys: Space blackout, F flash on next beat, arrows intensity / speed,
+  0 reset, H cheat sheet. FPS counter moved to I. Eight macro knobs.
+- Warehouse Tunnel reworked: wall waves, colour cycle, accent frames, core glow, strobe.
+
 ## 2026-11-09 — M2 extra: genre scene pack + gate test plan
 - Six new scenes, each made for a style of music: Canopy Breaks (jungle / drum & bass),
   Warehouse Tunnel (techno), Iron Furnace (metal), Midnight Window (lo-fi),

@@ -146,7 +146,7 @@ is in the middle; the **SCENE** panel is on the right.
 
 **Basics**
 - [ ] The picture moves smoothly. The top-left corner shows about **60 fps** (or your
-      screen's refresh rate). **F** hides/shows the counter.
+      screen's refresh rate). **I** hides/shows the counter (was F before M3).
 - [ ] The scene list (top of the right panel) has **Kaleido Bloom**, **Radial Spectrum**
       and **CRT Glitch**. Switching is instant.
 - [ ] Moving a slider changes the picture right away. **Reset** puts them back. Switch to
@@ -231,3 +231,48 @@ Meter values: e.g. "BPM showed 64, should be 128"
 ```
 Best of all: click **Analyse file offline…** for that song and tell me where the
 `.analysis.csv` file is saved. It lets me see every value the analysis produced.
+
+## M3 – Modulation, presets, palettes, performance keys
+
+Start the app and play a song with a clear beat. Everything below is in the **SCENE**
+panel on the right, or on the keyboard (click the picture first so keys go to the app).
+
+**Modulation ("~" buttons)**
+- [ ] Every slider has a **~** button. Click it, then **＋ Add modulation** → *Kick hit*.
+      The slider gets an orange marker that jumps on every kick and the button shows **~1**.
+- [ ] Change **amount**: bigger = bigger jumps; negative = moves the other way.
+- [ ] Add *LFO synced to the beat*: the value swings smoothly, in time with the music.
+- [ ] Add *Random wander*: slow wandering, never jumps.
+- [ ] Untick the small box at the start of a modulation row: it switches off without
+      being deleted. **✕** removes it.
+- [ ] Even at full amount, the value never leaves the slider's range.
+
+**Colours**
+- [ ] Open **COLOURS**: pick *Fire*, *Ice*, *Acid*… the whole scene recolours instantly.
+- [ ] *Custom*: change one of the five colour boxes and watch it change live.
+- [ ] *Scene colours* puts the original back.
+
+**Presets**
+- [ ] Open **PRESETS**: each scene lists 2–3 examples. Clicking one loads it.
+- [ ] Change some sliders, type a name, **Save**. It appears in the list (and as a
+      `.ron` file in `crates/scenes/presets/<scene>/`). Restart the app: still there.
+- [ ] The small number box next to a preset puts it on a key (1–9).
+- [ ] The bin icon deletes a preset.
+
+**Performance keys**
+- [ ] **1–9**: smooth crossfade to that preset (default 4 beats, set under PERFORMANCE).
+      Default keys: 1 Concrete, 2 Acid Corridor, 3 Deep Jungle, 4 Clean Ring,
+      5 Night Drive, 6 Rainy Night, 7 Northern Sky, 8 Peak Kaleido, 9 Red Room.
+- [ ] **Space**: blackout; Space again brings it back.
+- [ ] **F**: one white flash, exactly on the next beat.
+- [ ] **↑ / ↓**: modulations get stronger / weaker (shown at the bottom of the picture).
+- [ ] **← / →**: everything moves slower / faster. **0** resets both to 100%.
+- [ ] **H**: hotkey cheat sheet; **H** again hides it.
+- [ ] While typing a preset name, the keys type letters instead of triggering.
+- [ ] **MACROS**: eight knobs. Link a slider to *Macro 1* with **~**, then turn the
+      macro: the slider follows (MIDI will drive these in M4).
+
+**Known limits**
+- Colour pickers inside a scene can't be modulated yet, only number sliders.
+- Iron Furnace and Velvet Mirrorball have no example presets yet (being rebuilt next).
+- Crossfades restart the trails of the incoming scene.

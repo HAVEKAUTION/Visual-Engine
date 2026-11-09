@@ -39,7 +39,10 @@ fn render_scene(r: &mut Renderer, source: &str, name: &str, frames: u32) -> Vec<
         }
         sig.update(&f, 1.0 / 60.0, [SIZE.0 as f32, SIZE.1 as f32]);
         params.advance(&sig, 1.0 / 60.0);
-        r.render(&pipeline, sig.as_bytes(), params.block(), SIZE);
+        sig.set_palette(&params.current_palette());
+        r.begin_frame(SIZE);
+        r.render(0, &pipeline, sig.as_bytes(), params.block());
+        r.present(render::Master::default());
     }
     let (w, h, px) = r.read_display().expect("readback");
     assert_eq!((w, h), SIZE);
@@ -61,7 +64,7 @@ fn built_in_scenes_draw_something() {
     };
     let mut r = Renderer::new(&device, &queue);
     for b in scenes::builtin::BUILTIN {
-        r.clear_feedback();
+        r.clear_feedback(0);
         let px = render_scene(&mut r, b.source, b.file_name, 30);
         if let Ok(dir) = std::env::var("VE_DUMP_DIR") {
             write_bmp(
@@ -108,7 +111,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Same with a non-persistent buffer: A is black at the start of every frame.
     let once = src.replace("\"persistent\": true", "\"persistent\": false");
-    r.clear_feedback();
+    r.clear_feedback(0);
     let px = render_scene(&mut r, &once, "once.wgsl", 5);
     let red = px[0] as i32;
     assert!((red - 26).abs() <= 2, "red {red}"); // 0.1 → 26
@@ -133,4 +136,57 @@ fn write_bmp(path: &std::path::Path, w: u32, h: u32, rgba: &[u8]) {
         out.extend_from_slice(&[p[2], p[1], p[0], 255]);
     }
     std::fs::write(path, out).unwrap();
+}
+
+#[test]
+fn decks_crossfade_and_master_controls() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipped");
+        return;
+    };
+    let solid = |r: f32, b: f32| {
+        format!(
+            "@fragment\nfn fs_main(in: VsOut) -> @location(0) vec4<f32> {{ return vec4<f32>({r:.1}, 0.0, {b:.1}, 1.0); }}\n"
+        )
+    };
+    let mut r = Renderer::new(&device, &queue);
+    let red = r
+        .create_scene(&scenes::compile(&solid(1.0, 0.0), "red.wgsl").unwrap())
+        .unwrap();
+    let blue = r
+        .create_scene(&scenes::compile(&solid(0.0, 1.0), "blue.wgsl").unwrap())
+        .unwrap();
+    let mut sig = SignalState::new();
+    sig.update(&SignalFrame::default(), 0.016, [8.0, 8.0]);
+    let pixel = |r: &mut Renderer, master: render::Master| {
+        r.begin_frame((8, 8));
+        r.render(0, &red, sig.as_bytes(), &[0.0; 4]);
+        r.render(1, &blue, sig.as_bytes(), &[0.0; 4]);
+        r.present(master);
+        let (_, _, px) = r.read_display().unwrap();
+        [px[0] as i32, px[1] as i32, px[2] as i32]
+    };
+    let m = render::Master::default();
+    assert_eq!(pixel(&mut r, m), [255, 0, 0]);
+    assert_eq!(
+        pixel(&mut r, render::Master { mix_b: 1.0, ..m }),
+        [0, 0, 255]
+    );
+    let half = pixel(&mut r, render::Master { mix_b: 0.5, ..m });
+    assert!(
+        (half[0] - 128).abs() <= 2 && (half[2] - 128).abs() <= 2,
+        "{half:?}"
+    );
+    assert_eq!(pixel(&mut r, render::Master { gain: 0.0, ..m }), [0, 0, 0]);
+    assert_eq!(
+        pixel(
+            &mut r,
+            render::Master {
+                gain: 0.0,
+                flash: 1.0,
+                ..m
+            }
+        ),
+        [255, 255, 255]
+    );
 }

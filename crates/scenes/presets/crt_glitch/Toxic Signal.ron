@@ -1,0 +1,14 @@
+(
+    name: "Toxic Signal",
+    scene: "crt_glitch.wgsl",
+    values: {
+        "rgb_split": [1.2],
+        "noise": [0.5],
+    },
+    mods: {
+        "curve": [
+            (source: Signal("snare_age"), shape: Envelope(decay: 0.15), depth: 0.3, enabled: true),
+        ],
+    },
+    palette: Named("Acid"),
+)

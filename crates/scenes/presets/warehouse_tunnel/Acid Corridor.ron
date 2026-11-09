@@ -1,0 +1,18 @@
+(
+    name: "Acid Corridor",
+    scene: "warehouse_tunnel.wgsl",
+    values: {
+        "colour_cycle": [0.8],
+        "waves": [1.0],
+        "wave_count": [4.0],
+    },
+    mods: {
+        "line_width": [
+            (source: Signal("kick_age"), shape: Envelope(decay: 0.15), depth: 0.3, enabled: true),
+        ],
+        "roll_speed": [
+            (source: Lfo(wave: Sine, beats: 32.0), shape: Linear, depth: 0.3, enabled: true),
+        ],
+    },
+    palette: Named("Acid"),
+)

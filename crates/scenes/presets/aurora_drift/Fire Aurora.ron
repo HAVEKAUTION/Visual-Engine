@@ -1,0 +1,10 @@
+(
+    name: "Fire Aurora",
+    scene: "aurora_drift.wgsl",
+    values: {
+        "trails": [0.92],
+    },
+    mods: {
+    },
+    palette: Named("Fire"),
+)

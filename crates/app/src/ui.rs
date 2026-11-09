@@ -181,7 +181,7 @@ impl VisualEngineApp {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.heading("Visual Engine");
-        ui.label(RichText::new("Milestone 2 · scenes").weak());
+        ui.label(RichText::new("Milestone 3 · modulation + presets").weak());
         ui.add_space(12.0);
 
         // ---------------- Song file ----------------
@@ -489,6 +489,9 @@ impl VisualEngineApp {
             );
             painter.galley(pos, galley, label_color);
         }
+        self.scene
+            .perf
+            .draw_overlay(&painter, rect, !self.fullscreen);
         if !has_source && !self.fullscreen {
             let msg = "No audio source. Open a song or start a live input on the left.";
             let pos = rect.center_bottom() - Vec2::new(0.0, 40.0);
@@ -604,15 +607,17 @@ impl eframe::App for VisualEngineApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
-        // Keyboard: F11 fullscreen, Esc leaves it, M meters, F FPS counter.
+        // Keyboard: F11 fullscreen, Esc leaves it, M meters, I FPS counter,
+        // plus the performance keys (see perform.rs / H in the app).
         // (Ignored while typing in a text field.)
         let typing = ui.ctx().egui_wants_keyboard_input();
+        self.scene.handle_keys(ui.ctx());
         let (f11, esc, m, f) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::F11),
                 i.key_pressed(egui::Key::Escape),
                 i.key_pressed(egui::Key::M),
-                i.key_pressed(egui::Key::F),
+                i.key_pressed(egui::Key::I),
             )
         });
         if f11 || (esc && self.fullscreen) {
@@ -628,10 +633,10 @@ impl eframe::App for VisualEngineApp {
         // Manual rhythm controls (keyboard).
         let (tap, resync) =
             ui.input(|i| (i.key_pressed(egui::Key::T), i.key_pressed(egui::Key::R)));
-        if tap {
+        if tap && !typing {
             self.send(Command::Tap);
         }
-        if resync {
+        if resync && !typing {
             self.send(Command::ResyncDownbeat);
         }
 
@@ -660,8 +665,8 @@ impl eframe::App for VisualEngineApp {
 
         egui::Panel::right("scene")
             .resizable(true)
-            .default_size(300.0)
-            .size_range(240.0..=480.0)
+            .default_size(340.0)
+            .size_range(300.0..=520.0)
             .frame(
                 egui::Frame::side_top_panel(ui.style())
                     .fill(PANEL_BG)

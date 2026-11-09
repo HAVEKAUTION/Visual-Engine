@@ -1,0 +1,15 @@
+(
+    name: "Violet Storm",
+    scene: "aurora_drift.wgsl",
+    values: {
+        "hue_base": [0.5],
+        "brightness": [1.4],
+        "flow_speed": [0.3],
+    },
+    mods: {
+        "height": [
+            (source: Lfo(wave: Sine, beats: 32.0), shape: Linear, depth: 0.15, enabled: true),
+        ],
+    },
+    palette: Scene,
+)

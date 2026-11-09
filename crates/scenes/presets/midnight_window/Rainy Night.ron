@@ -1,0 +1,9 @@
+(
+    name: "Rainy Night",
+    scene: "midnight_window.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

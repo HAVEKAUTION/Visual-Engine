@@ -87,8 +87,10 @@ pub const SIGNAL_NAMES: &[&str] = &[
 /// Number of scalars, rounded up to a multiple of 4 (the mel array that
 /// follows must start on a 16-byte boundary).
 pub const SCALARS_PADDED: usize = SIGNAL_NAMES.len().div_ceil(4) * 4;
+/// Where the palette (5 × vec4) starts.
+pub const PALETTE_OFFSET: usize = SCALARS_PADDED + signals::MEL_BANDS;
 /// Floats in the whole block.
-pub const BLOCK_FLOATS: usize = SCALARS_PADDED + signals::MEL_BANDS;
+pub const BLOCK_FLOATS: usize = PALETTE_OFFSET + 4 * crate::palette::PALETTE_SIZE;
 
 /// Age reported for events that have not happened yet (s).
 pub const NEVER: f32 = 1.0e4;
@@ -134,9 +136,10 @@ pub fn wgsl_struct() -> String {
     for i in SIGNAL_NAMES.len()..SCALARS_PADDED {
         s += &format!("    _pad{i}: f32,\n");
     }
+    s += &format!("    mel: array<vec4<f32>, {}>,\n", signals::MEL_BANDS / 4);
     s += &format!(
-        "    mel: array<vec4<f32>, {}>,\n}}\n",
-        signals::MEL_BANDS / 4
+        "    palette: array<vec4<f32>, {}>,\n}}\n",
+        crate::palette::PALETTE_SIZE
     );
     s
 }
@@ -283,7 +286,16 @@ impl SignalState {
         b[const { idx("clock_high") }] += high * dt;
         b[const { idx("clock_kick") }] += kick_env * dt;
 
-        b[SCALARS_PADDED..].copy_from_slice(&f.mel);
+        b[SCALARS_PADDED..PALETTE_OFFSET].copy_from_slice(&f.mel);
+    }
+
+    /// Set the five palette colours scenes see as `pal_color(0..4)`.
+    pub fn set_palette(&mut self, p: &crate::palette::Palette) {
+        for (i, c) in p.iter().enumerate() {
+            let at = PALETTE_OFFSET + 4 * i;
+            self.block[at..at + 3].copy_from_slice(c);
+            self.block[at + 3] = 1.0;
+        }
     }
 
     pub fn as_bytes(&self) -> &[u8] {

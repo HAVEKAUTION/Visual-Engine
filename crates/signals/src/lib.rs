@@ -9,6 +9,8 @@
 //! always gets the newest complete [`SignalFrame`] without waiting (triple
 //! buffer: neither side ever blocks the other).
 
+pub mod modulation;
+
 /// Number of mel-spaced bands.
 pub const MEL_BANDS: usize = 32;
 

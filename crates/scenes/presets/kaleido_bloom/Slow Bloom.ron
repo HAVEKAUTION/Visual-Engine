@@ -1,0 +1,15 @@
+(
+    name: "Slow Bloom",
+    scene: "kaleido_bloom.wgsl",
+    values: {
+        "flow_speed": [0.12],
+        "trails": [0.93],
+        "spin_speed": [0.04],
+    },
+    mods: {
+        "zoom": [
+            (source: Signal("bass_slow"), shape: Linear, depth: 0.08, enabled: true),
+        ],
+    },
+    palette: Named("Ocean"),
+)

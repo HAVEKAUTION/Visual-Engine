@@ -1,0 +1,9 @@
+(
+    name: "Northern Sky",
+    scene: "aurora_drift.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

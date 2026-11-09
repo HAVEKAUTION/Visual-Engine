@@ -1,0 +1,9 @@
+(
+    name: "Clean Ring",
+    scene: "radial_spectrum.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

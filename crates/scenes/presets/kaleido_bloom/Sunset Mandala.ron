@@ -1,0 +1,15 @@
+(
+    name: "Sunset Mandala",
+    scene: "kaleido_bloom.wgsl",
+    values: {
+        "segments": [10.0],
+        "saturation": [1.0],
+        "colour_spread": [0.6],
+    },
+    mods: {
+        "zoom": [
+            (source: Signal("beat_phase"), shape: Pulse(k: 3.0), depth: -0.06, enabled: true),
+        ],
+    },
+    palette: Named("Sunset"),
+)

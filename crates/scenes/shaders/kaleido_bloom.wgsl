@@ -3,6 +3,7 @@
   "author": "Visual Engine",
   "style": "psychedelic",
   "genres": ["Psytrance", "Trance", "Psychedelic"],
+  "palette": ["#ff006e", "#fb5607", "#ffbe0b", "#3a86ff", "#8338ec"],
   "description": "A domain-warped fractal folded into a kaleidoscope, with feedback trails. Colour follows how bright the sound is (spectral centroid); bass drives the spin, loudness the flow, kicks punch the zoom.",
   "inputs": [
     { "name": "segments",   "label": "Mirror segments",   "type": "float", "min": 2,    "max": 12,   "default": 6 },
@@ -13,7 +14,8 @@
     { "name": "trails",     "label": "Trails (feedback)", "type": "float", "min": 0,    "max": 0.97, "default": 0.88 },
     { "name": "kick_punch", "label": "Kick punch",        "type": "float", "min": 0,    "max": 1,    "default": 0.6 },
     { "name": "saturation", "label": "Saturation",        "type": "float", "min": 0,    "max": 1,    "default": 0.85 },
-    { "name": "hue_shift",  "label": "Hue shift",         "type": "float", "min": 0,    "max": 1,    "default": 0.0 }
+    { "name": "hue_shift",  "label": "Colour shift",      "type": "float", "min": 0,    "max": 1,    "default": 0.0 },
+    { "name": "colour_spread", "label": "Colour spread",  "type": "float", "min": 0,    "max": 2,    "default": 1.0 }
   ],
   "clocks": [
     { "name": "spin",    "speed": "spin_speed", "signal": "bass_slow",     "amount": 1.5 },
@@ -54,14 +56,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let f = fbm2(p0 + k * w2);
 
     // --- Colour ------------------------------------------------------------
-    // Hue from the spectral centroid: bassy, dark sound = warm, bright = cool.
-    let hue = audio.centroid_hue_slow * 0.75 + params.hue_shift + 0.35 * length(w2) + 0.3 * f;
+    // Position in the palette follows the spectral centroid: bassy, dark sound
+    // and bright sound sit at different ends of the palette.
+    let hue = audio.centroid_hue_slow * 0.75 + params.hue_shift
+        + params.colour_spread * (0.35 * length(w2) + 0.3 * f);
     let level = clamp(audio.loudness_slow, 0.0, 3.0);
     let v = smoothstep(0.2, 0.9, f) * 1.1 * (0.5 + 0.35 * level) + 0.7 * kick * f * f;
-    var col = hsv2rgb(vec3<f32>(hue, params.saturation, 1.0)) * v;
+    let tint = pal(hue);
+    let grey = vec3<f32>(dot(tint, vec3<f32>(0.3, 0.55, 0.15)));
+    var col = mix(grey, tint, params.saturation) * v;
     // Bright filaments where the warp folds hard, sparkling with the hats.
     let fil = smoothstep(0.72, 0.95, w1.x * w2.y * 1.8);
-    col += hsv2rgb(vec3<f32>(hue + 0.5, 0.5 * params.saturation, 1.0))
+    col += mix(vec3<f32>(1.0), pal(hue + 0.5), params.saturation)
         * fil * (0.25 + 0.6 * env(audio.hat_age, 0.08));
     // Soft fade at the centre so the fold point doesn't look pinched.
     col *= smoothstep(0.0, 0.25, r * params.zoom);

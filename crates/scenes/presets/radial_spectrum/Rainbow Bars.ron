@@ -1,0 +1,14 @@
+(
+    name: "Rainbow Bars",
+    scene: "radial_spectrum.wgsl",
+    values: {
+        "colour_spread": [1.0],
+        "colour_drift": [0.1],
+    },
+    mods: {
+        "radius": [
+            (source: Signal("kick_age"), shape: Envelope(decay: 0.15), depth: 0.08, enabled: true),
+        ],
+    },
+    palette: Named("Vapor"),
+)

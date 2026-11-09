@@ -1,0 +1,11 @@
+(
+    name: "Neon City",
+    scene: "midnight_window.wgsl",
+    values: {
+        "bokeh_size": [0.18],
+        "rain": [0.9],
+    },
+    mods: {
+    },
+    palette: Named("Neon"),
+)

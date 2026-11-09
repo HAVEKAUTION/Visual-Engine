@@ -1,0 +1,11 @@
+(
+    name: "Ice Broadcast",
+    scene: "crt_glitch.wgsl",
+    values: {
+        "scanlines": [0.7],
+        "drive_speed": [1.2],
+    },
+    mods: {
+    },
+    palette: Named("Ice"),
+)

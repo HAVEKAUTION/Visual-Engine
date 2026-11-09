@@ -14,7 +14,9 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
 - **M2 – renderer and first scenes**: done. WGSL scenes with feedback, hot reload, three
   built-in scenes, scene picker, fullscreen, FPS counter. Writing scenes: `docs/SCENES.md`.
 - **Genre scene pack**: nine scenes in total, each tagged with the music it suits.
-- **M3** (modulation, presets, hotkeys): next.
+- **M3 – modulation, presets, hotkeys**: done. Link any slider to the music, colour
+  palettes, presets on keys 1–9 with crossfades, blackout / flash / intensity keys.
+- **GATE** (a whole song looks great hands-off): next, then M4 (layers, MIDI).
 
 ## Running it
 

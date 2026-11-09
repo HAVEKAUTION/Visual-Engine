@@ -1,0 +1,9 @@
+(
+    name: "Deep Jungle",
+    scene: "canopy_breaks.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

@@ -2,7 +2,9 @@
 
 mod analysis_thread;
 mod debug_panel;
+mod mod_editor;
 mod offline;
+mod perform;
 mod rhythm_panel;
 mod scene_view;
 mod ui;

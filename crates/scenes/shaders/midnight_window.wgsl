@@ -3,6 +3,7 @@
   "author": "Visual Engine",
   "style": "cozy / soft",
   "genres": ["Lo-Fi", "Chillhop", "Jazz"],
+  "palette": ["#16112a", "#ffb86b", "#ff7eb3", "#7afcff", "#feff9c"],
   "description": "City lights blurred through a rainy window at night, on slightly worn tape. Each of the soft bokeh lights listens to its own slice of the spectrum, kicks breathe the exposure gently, hats bring the rain.",
   "inputs": [
     { "name": "drift_speed", "label": "Drift speed",   "type": "float", "min": 0,    "max": 1,   "default": 0.15 },
@@ -27,7 +28,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let xy = (uv - 0.5) * vec2f(audio.aspect, -1.0) * 2.0;
 
     // --- Night city background -------------------------------------------
-    var col = mix(vec3f(0.03, 0.025, 0.06), vec3f(0.09, 0.05, 0.1), smoothstep(1.0, -1.0, xy.y));
+    var col = pal_color(0) * mix(0.6, 1.2, smoothstep(1.0, -1.0, xy.y));
 
     // --- Bokeh lights, one per mel band ------------------------------------
     for (var i = 0; i < 24; i++) {
@@ -39,8 +40,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
         let d = length(xy - vec2f(x, y));
         let disk = smoothstep(r, r * 0.8, d);
         let rim = smoothstep(r * 0.75, r * 0.95, d) * disk;
-        let hue = fract(0.05 + 0.6 * hash11(fi * 2.7)) * 0.8 + 0.02;
-        let lc = hsv2rgb(vec3f(hue, 0.55, 1.0));
+        // Lights use palette colours 1–4.
+        let lc = mix(pal_color(1 + i32(hash11(fi * 2.7) * 4.0)), vec3f(1.0), 0.15);
         let band = 1.0 - exp(-0.8 * mel_band(i + 4));
         col += lc * (disk * 0.18 + rim * 0.12) * (0.4 + 0.9 * band);
     }
@@ -56,7 +57,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let trail = smoothstep(0.03, 0.0, abs(fract(g.x) - bead_pos.x)) * step(fract(g.y), bead_pos.y)
         * step(1.0 - params.rain * 0.7, h) * 0.25;
     let hat_rain = 0.6 + 0.6 * env(audio.hat_age, 0.2);
-    col += vec3f(0.55, 0.6, 0.75) * (bead * 0.35 + trail * 0.15) * hat_rain;
+    col += mix(pal_color(3), vec3f(0.7), 0.6) * (bead * 0.35 + trail * 0.15) * hat_rain;
 
     // --- Warm grade, gentle kick breath, soft blur via feedback -------------
     col *= mix(vec3f(1.0), vec3f(1.15, 0.95, 0.78), params.warmth);

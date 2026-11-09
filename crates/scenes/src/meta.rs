@@ -38,6 +38,9 @@ pub struct SceneMeta {
     /// Free-form style tag (psychedelic, minimal, glitch, ...).
     #[serde(default, alias = "STYLE", alias = "CATEGORIES")]
     pub style: serde_json::Value,
+    /// Default colours, `#rrggbb`, up to five (see `pal(t)` in shaders).
+    #[serde(default, alias = "PALETTE")]
+    pub palette: Vec<String>,
     /// Music the scene is made for, e.g. `["Techno", "Minimal"]`.
     #[serde(default, alias = "GENRES")]
     pub genres: Vec<String>,
@@ -277,6 +280,7 @@ impl SceneMeta {
                 return Err(format!("input \"{}\": min must be below max", i.name));
             }
         }
+        crate::palette::from_hex_list(&self.palette)?;
         for c in &self.clocks {
             if let Some(sig) = &c.signal
                 && uniforms::signal_index(sig).is_none()

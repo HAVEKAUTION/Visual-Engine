@@ -46,6 +46,19 @@ fn mel_at(x: f32) -> f32 {
     return mix(mel_band(i), mel_band(i + 1), fract(f));
 }
 
+// Palette colour 0..4 (the scene's colours, or the palette picked in the UI).
+fn pal_color(i: i32) -> vec3<f32> {
+    return audio.palette[clamp(i, 0, 4)].rgb;
+}
+
+// Smooth gradient through the five palette colours; t wraps around (0..1).
+fn pal(t: f32) -> vec3<f32> {
+    let x = fract(t) * 5.0;
+    let i = i32(floor(x));
+    let f = smoothstep(0.0, 1.0, fract(x));
+    return mix(pal_color(i), pal_color((i + 1) % 5), f);
+}
+
 // Decaying envelope: 1 at the hit, falling with time constant `decay` (s).
 fn env(age: f32, decay: f32) -> f32 {
     return exp(-max(age, 0.0) / decay);
