@@ -1,0 +1,119 @@
+//! Turn a scene file into checked WGSL: parse the header, append the prelude
+//! and generated structs, and validate everything with naga so errors come
+//! back as readable text with line numbers from the user's file.
+
+use crate::meta::SceneMeta;
+use crate::params::ParamLayout;
+use crate::uniforms;
+
+const PRELUDE: &str = include_str!("prelude.wgsl");
+
+/// Name of the shared vertex shader entry point.
+pub const VERTEX_ENTRY: &str = "vs_fullscreen";
+
+/// A scene that parsed and validated.
+#[derive(Debug, Clone)]
+pub struct CompiledScene {
+    pub meta: SceneMeta,
+    /// Complete WGSL (user code + prelude), ready for wgpu.
+    pub wgsl: String,
+}
+
+/// The full WGSL for a scene: user source first, then the generated code.
+pub fn full_source(user: &str, meta: &SceneMeta) -> String {
+    let mut s = String::with_capacity(user.len() + PRELUDE.len() + 4096);
+    s += user;
+    if !user.ends_with('\n') {
+        s.push('\n');
+    }
+    s += PRELUDE;
+    s += "\n";
+    s += &uniforms::wgsl_struct();
+    s += "\n";
+    s += &ParamLayout::wgsl_struct(meta);
+    s
+}
+
+/// naga draws its error boxes with line-drawing characters the UI font
+/// doesn't have; swap them for ASCII.
+fn plain(msg: String) -> String {
+    msg.replace(['┌', '└'], "+")
+        .replace('─', "-")
+        .replace('│', "|")
+        .replace('·', ".")
+}
+
+/// Parse and validate. `file_name` is used in error messages.
+pub fn compile(source: &str, file_name: &str) -> Result<CompiledScene, String> {
+    let stem = file_name.trim_end_matches(".wgsl");
+    let meta = SceneMeta::parse(source, stem)?;
+    let wgsl = full_source(source, &meta);
+
+    let module = naga::front::wgsl::parse_str(&wgsl)
+        .map_err(|e| plain(e.emit_to_string_with_path(&wgsl, file_name)))?;
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::default(),
+    )
+    .validate(&module)
+    .map_err(|e| plain(e.emit_to_string_with_path(&wgsl, file_name)))?;
+
+    for pass in &meta.passes {
+        let ok = module
+            .entry_points
+            .iter()
+            .any(|e| e.name == pass.entry && e.stage == naga::ShaderStage::Fragment);
+        if !ok {
+            return Err(format!(
+                "{file_name}: no fragment shader called `{}`. Add\n\n@fragment\nfn {}(in: VsOut) -> @location(0) vec4<f32> {{ ... }}",
+                pass.entry, pass.entry
+            ));
+        }
+    }
+    Ok(CompiledScene { meta, wgsl })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MINIMAL: &str = r#"/*{"name": "m", "inputs": [{"name": "k", "type": "float"}, {"name": "c", "type": "color"}],
+        "clocks": [{"name": "spin", "signal": "bass_slow"}]}*/
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let m = mel_at(in.uv.x) + audio.kick_age + params.k + params.spin;
+    return vec4<f32>(params.c.rgb * m, 1.0) + prev(in.uv) + sample_a(in.uv) + sample_b(in.uv);
+}
+"#;
+
+    #[test]
+    fn compiles_with_prelude() {
+        let c = compile(MINIMAL, "m.wgsl").unwrap();
+        assert!(c.wgsl.contains("struct Signals"));
+    }
+
+    #[test]
+    fn errors_point_at_user_lines() {
+        let src = "/*{\"name\": \"x\"}*/\n@fragment\nfn fs_main(in: VsOut) -> @location(0) vec4<f32> {\n    return vec4<f32>(oops, 1.0);\n}\n";
+        let e = compile(src, "x.wgsl").unwrap_err();
+        assert!(e.contains("oops"), "{e}");
+        assert!(e.contains("x.wgsl:4:"), "{e}");
+    }
+
+    #[test]
+    fn missing_entry_point_is_reported() {
+        let src =
+            "@fragment\nfn other(in: VsOut) -> @location(0) vec4<f32> { return vec4<f32>(1.0); }\n";
+        let e = compile(src, "y.wgsl").unwrap_err();
+        assert!(e.contains("fs_main"), "{e}");
+    }
+
+    #[test]
+    fn built_in_scenes_compile() {
+        for b in crate::builtin::BUILTIN {
+            if let Err(e) = compile(b.source, b.file_name) {
+                panic!("{}:\n{e}", b.file_name);
+            }
+        }
+    }
+}

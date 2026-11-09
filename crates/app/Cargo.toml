@@ -20,3 +20,5 @@ triple_buffer.workspace = true
 eframe.workspace = true
 egui.workspace = true
 rfd.workspace = true
+render.workspace = true
+scenes.workspace = true

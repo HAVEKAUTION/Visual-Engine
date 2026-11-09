@@ -4,6 +4,7 @@ mod analysis_thread;
 mod debug_panel;
 mod offline;
 mod rhythm_panel;
+mod scene_view;
 mod ui;
 
 fn main() -> eframe::Result {

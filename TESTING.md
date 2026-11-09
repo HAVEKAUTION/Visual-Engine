@@ -138,3 +138,54 @@ meter panel; events are listed under **EVENTS** in the side panel.
 - Very fast drum & bass (170+ BPM) reads as half time (e.g. 87). Tap T to fix it.
 - Snares with a lot of low body can also flash KICK (the kick band is 20–250 Hz).
 - Bar 1 is a guess until you press R or a drop is detected.
+
+## M2 – Renderer and first scenes
+
+Start the app with a song playing (house/techno with a clear kick is best). The picture
+is in the middle; the **SCENE** panel is on the right.
+
+**Basics**
+- [ ] The picture moves smoothly. The top-left corner shows about **60 fps** (or your
+      screen's refresh rate). **F** hides/shows the counter.
+- [ ] The scene list (top of the right panel) has **Kaleido Bloom**, **Radial Spectrum**
+      and **CRT Glitch**. Switching is instant.
+- [ ] Moving a slider changes the picture right away. **Reset** puts them back. Switch to
+      another scene and back: your slider settings are remembered.
+- [ ] **F11** (or double-click the picture) = fullscreen picture only. **F11** or **Esc**
+      comes back. **M** shows/hides the signal meters.
+
+**Kaleido Bloom** (psychedelic)
+- [ ] A mirrored, flowing fractal with trails. Kicks give a zoom "punch".
+- [ ] It flows faster when the music is louder and spins faster with more bass, but
+      never jumps. Paused or quiet: it keeps drifting slowly.
+- [ ] Colour shifts with the sound: bassy parts warmer (red/orange), bright parts cooler.
+- [ ] "Trails" at 0 = no trails; near max = long smeary trails.
+
+**Radial Spectrum** (minimal)
+- [ ] Bars around a ring: bass at the top, highs at the bottom, mirrored left/right.
+- [ ] The ring and the centre dot pulse on every kick (dot turns the kick colour), leaving
+      fading echo rings.
+- [ ] Silence: bars shrink to nothing, only the thin ring stays.
+
+**CRT Glitch** (retro/glitch)
+- [ ] Synthwave sun, a grid floor moving towards you (faster with more bass) and a
+      skyline made of the spectrum.
+- [ ] Every snare/clap: the picture tears into shifted blocks with colour fringes.
+- [ ] At a drop: a short negative flash and a big glitch.
+- [ ] Scanline / Screen curve / Noise sliders change the CRT look.
+
+**Hot reload** (try it: no programming needed, just change a number)
+- [ ] Click **Open scenes folder**, open `radial_spectrum.wgsl` in Notepad (Windows) or
+      TextEdit (Mac; Format → Make Plain Text first). Change `"default": 72` (Bars) to
+      `"default": 20`, save. Within a second the scene reloads ("Reloaded ..." in green);
+      press **Reset** to see 20 bars.
+- [ ] Break it on purpose: type `xyz` on a line inside `fs_main` and save. A red error
+      appears with the line number; the scene keeps running. Remove `xyz`, save: the error
+      goes away.
+- [ ] Undo your changes afterwards (or keep them; they are your scenes now).
+
+**Known limits**
+- Resizing the window or panels restarts the trails (feedback clears).
+- The picture renders at the preview size; fullscreen on a 4K screen renders 4K.
+- There is no separate output window yet (2nd screen comes in M5); fullscreen is the
+  main window.

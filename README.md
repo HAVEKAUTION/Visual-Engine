@@ -10,7 +10,10 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
   fast/slow smoothing, centroid, loudness, with a live meter panel.
 - **M1 part 2 – rhythm and structure**: done. Kick/snare/hat onsets, BPM, beat/bar/
   phrase clock, build/drop/section change, tap tempo, offline CSV export.
-- **GATE** (meters match kicks, snares and tempo on your own songs): next.
+- **GATE** (meters match kicks, snares and tempo on your own songs): passed.
+- **M2 – renderer and first scenes**: done. WGSL scenes with feedback, hot reload, three
+  built-in scenes, scene picker, fullscreen, FPS counter. Writing scenes: `docs/SCENES.md`.
+- **M3** (modulation, presets, hotkeys): next.
 
 ## Running it
 

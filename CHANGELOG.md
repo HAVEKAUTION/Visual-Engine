@@ -2,6 +2,20 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — M2: renderer and first scenes
+- wgpu renderer: full-screen WGSL scenes in the preview, one uniform block with every
+  signal (+ time, resolution, built-in audio clocks), ping-pong feedback of the previous
+  frame, optional buffers A/B (persistent or not) and multi-pass scenes.
+- Scene format: `.wgsl` with an ISF-style JSON header (name, author, inputs, clocks,
+  buffers, passes). Inputs become sliders / checkboxes / colour pickers. "Clocks" make
+  motion follow the drive-speed-not-position rule. See docs/SCENES.md.
+- Hot reload: saving a scene recompiles it; errors are shown and the last working
+  version keeps running.
+- Three scenes: Kaleido Bloom (psychedelic), Radial Spectrum (minimal), CRT Glitch
+  (retro/glitch).
+- Scene picker panel, F11 / double-click fullscreen (Esc leaves), FPS counter (F),
+  meters toggle (M, now off by default), optional waveform overlay.
+
 ## 2026-11-09 — M1 part 2: rhythm and structure
 - Onsets: spectral flux with adaptive threshold (λ·median + κ, 50 ms minimum gap),
   overall + kick/snare/hat; one-bin max filter stops kick pitch sweeps double-triggering.

@@ -10,6 +10,7 @@ use crate::analysis_thread::{self, Command, WaveformSnapshot};
 use crate::debug_panel;
 use crate::offline::{self, OfflineReport};
 use crate::rhythm_panel::RhythmView;
+use crate::scene_view::SceneView;
 
 const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 12);
 const PANEL_BG: Color32 = Color32::from_rgb(20, 20, 26);
@@ -37,6 +38,10 @@ pub struct VisualEngineApp {
     seek_drag: Option<f64>,
     error: Option<String>,
     gpu_info: String,
+    scene: SceneView,
+    fullscreen: bool,
+    show_waveform: bool,
+    show_fps: bool,
 }
 
 impl VisualEngineApp {
@@ -71,7 +76,7 @@ impl VisualEngineApp {
             rhythm_view: RhythmView::default(),
             offline_job: None,
             offline_result: None,
-            show_meters: true,
+            show_meters: false,
             hop_rate_mark: (0, Instant::now()),
             hops_per_sec: 0.0,
             loading: None,
@@ -81,6 +86,10 @@ impl VisualEngineApp {
             seek_drag: None,
             error: None,
             gpu_info,
+            scene: SceneView::new(cc),
+            fullscreen: false,
+            show_waveform: false,
+            show_fps: true,
         };
         app.rescan_inputs();
         if let Some(path) = startup_song {
@@ -172,7 +181,7 @@ impl VisualEngineApp {
     fn side_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         ui.heading("Visual Engine");
-        ui.label(RichText::new("Milestone 1 · analysis + rhythm").weak());
+        ui.label(RichText::new("Milestone 2 · scenes").weak());
         ui.add_space(12.0);
 
         // ---------------- Song file ----------------
@@ -228,7 +237,7 @@ impl VisualEngineApp {
             // Seek bar: follow playback, but while the user holds the handle
             // keep their value and only seek when they let go.
             let mut pos = self.seek_drag.unwrap_or_else(|| player.position_secs());
-            ui.spacing_mut().slider_width = ui.available_width() - 8.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - 12.0).max(60.0);
             let resp = ui.add(
                 egui::Slider::new(&mut pos, 0.0..=player.duration_secs().max(0.001))
                     .show_value(false),
@@ -240,7 +249,7 @@ impl VisualEngineApp {
                 seek_to = self.seek_drag.take();
             }
 
-            ui.spacing_mut().slider_width = ui.available_width() - 80.0;
+            ui.spacing_mut().slider_width = (ui.available_width() - 120.0).max(60.0);
             ui.horizontal(|ui| {
                 ui.label("Volume");
                 let mut v = self.volume;
@@ -326,7 +335,8 @@ impl VisualEngineApp {
         ui.add_space(18.0);
         ui.label(RichText::new("ANALYSIS").strong());
         ui.separator();
-        ui.checkbox(&mut self.show_meters, "Show signal meters");
+        ui.checkbox(&mut self.show_meters, "Show signal meters (M)");
+        ui.checkbox(&mut self.show_waveform, "Waveform overlay");
         ui.horizontal(|ui| {
             if ui
                 .button("Tap (T)")
@@ -442,64 +452,83 @@ impl VisualEngineApp {
         });
     }
 
-    fn preview(&mut self, ui: &mut egui::Ui) {
-        let (rect, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
+    fn preview(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        let (rect, response) = ui.allocate_exact_size(ui.available_size(), Sense::click());
+        if response.double_clicked() {
+            self.toggle_fullscreen(ui.ctx());
+        }
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, PREVIEW_BG);
 
+        let signal_frame = self.signals.latest().clone();
+        self.scene.paint(ui, frame, rect, &signal_frame);
+
         let snap = self.waveform.read();
+        if self.show_waveform {
+            draw_waveform(&painter, rect, &snap.columns);
+        }
         let has_source = !matches!(self.engine.source(), Source::None);
 
-        // Waveform band across the middle of the preview.
-        let band = Rect::from_center_size(
-            rect.center(),
-            Vec2::new(rect.width() - 48.0, (rect.height() * 0.5).min(420.0)),
-        );
-        let mid = band.center().y;
-        painter.line_segment(
-            [Pos2::new(band.left(), mid), Pos2::new(band.right(), mid)],
-            Stroke::new(1.0, Color32::from_gray(40)),
-        );
-
-        let n = snap.columns.len();
-        if n > 0 {
-            let half = band.height() * 0.5;
-            let stroke = Stroke::new(1.5, WAVE_COLOR);
-            for (i, [lo, hi]) in snap.columns.iter().enumerate() {
-                let x = band.left() + band.width() * (i as f32 + 0.5) / n as f32;
-                let y_top = mid - hi.clamp(-1.0, 1.0) * half;
-                let y_bot = mid - lo.clamp(-1.0, 1.0) * half;
-                // Always draw at least a 1 px line so silence is visible.
-                let (y0, y1) = if (y_bot - y_top) < 1.0 {
-                    (mid - 0.5, mid + 0.5)
-                } else {
-                    (y_top, y_bot)
-                };
-                painter.line_segment([Pos2::new(x, y0), Pos2::new(x, y1)], stroke);
-            }
-        }
-
-        let label_color = Color32::from_gray(120);
-        painter.text(
-            rect.left_top() + Vec2::new(16.0, 14.0),
-            egui::Align2::LEFT_TOP,
-            format!(
-                "Waveform · last {:.0} s · 48 kHz mono feed · peak {:.2}",
-                analysis_thread::HISTORY_SECS,
-                snap.peak
-            ),
-            egui::FontId::proportional(13.0),
-            label_color,
-        );
-        if !has_source {
-            painter.text(
-                band.center_bottom() + Vec2::new(0.0, 28.0),
-                egui::Align2::CENTER_TOP,
-                "No audio source. Open a song or start a live input on the left.",
-                egui::FontId::proportional(15.0),
-                label_color,
+        let label_color = Color32::from_gray(200);
+        if self.show_fps && !self.fullscreen {
+            let size = self
+                .scene
+                .render_size()
+                .map(|(w, h)| format!(" · {w}×{h}"))
+                .unwrap_or_default();
+            let text = format!(
+                "{:.0} fps · {:.1} ms{size}",
+                self.scene.fps, self.scene.frame_ms
             );
+            let pos = rect.left_top() + Vec2::new(10.0, 8.0);
+            let galley = painter.layout_no_wrap(text, egui::FontId::monospace(12.0), label_color);
+            painter.rect_filled(
+                Rect::from_min_size(pos - Vec2::splat(4.0), galley.size() + Vec2::splat(8.0)),
+                CornerRadius::same(3),
+                Color32::from_black_alpha(150),
+            );
+            painter.galley(pos, galley, label_color);
         }
+        if !has_source && !self.fullscreen {
+            let msg = "No audio source. Open a song or start a live input on the left.";
+            let pos = rect.center_bottom() - Vec2::new(0.0, 40.0);
+            let galley =
+                painter.layout_no_wrap(msg.into(), egui::FontId::proportional(15.0), label_color);
+            let r = Rect::from_center_size(pos, galley.size() + Vec2::new(16.0, 10.0));
+            painter.rect_filled(r, CornerRadius::same(4), Color32::from_black_alpha(160));
+            painter.galley(r.min + Vec2::new(8.0, 5.0), galley, label_color);
+        }
+    }
+
+    fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
+        self.fullscreen = !self.fullscreen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+    }
+}
+
+/// The 48 kHz feed's waveform, drawn as an overlay across the middle.
+fn draw_waveform(painter: &egui::Painter, rect: Rect, columns: &[[f32; 2]]) {
+    let band = Rect::from_center_size(
+        rect.center(),
+        Vec2::new(rect.width() - 48.0, (rect.height() * 0.4).min(320.0)),
+    );
+    let mid = band.center().y;
+    let n = columns.len();
+    if n == 0 {
+        return;
+    }
+    let half = band.height() * 0.5;
+    let stroke = Stroke::new(1.5, WAVE_COLOR.gamma_multiply(0.8));
+    for (i, [lo, hi]) in columns.iter().enumerate() {
+        let x = band.left() + band.width() * (i as f32 + 0.5) / n as f32;
+        let y_top = mid - hi.clamp(-1.0, 1.0) * half;
+        let y_bot = mid - lo.clamp(-1.0, 1.0) * half;
+        let (y0, y1) = if (y_bot - y_top) < 1.0 {
+            (mid - 0.5, mid + 0.5)
+        } else {
+            (y_top, y_bot)
+        };
+        painter.line_segment([Pos2::new(x, y0), Pos2::new(x, y1)], stroke);
     }
 }
 
@@ -574,17 +603,27 @@ impl eframe::App for VisualEngineApp {
         ctx.request_repaint();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        egui::Panel::left("sources")
-            .resizable(true)
-            .default_size(320.0)
-            .size_range(260.0..=520.0)
-            .frame(
-                egui::Frame::side_top_panel(ui.style())
-                    .fill(PANEL_BG)
-                    .inner_margin(12.0),
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        // Keyboard: F11 fullscreen, Esc leaves it, M meters, F FPS counter.
+        // (Ignored while typing in a text field.)
+        let typing = ui.ctx().egui_wants_keyboard_input();
+        let (f11, esc, m, f) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::F11),
+                i.key_pressed(egui::Key::Escape),
+                i.key_pressed(egui::Key::M),
+                i.key_pressed(egui::Key::F),
             )
-            .show(ui, |ui| self.side_panel(ui));
+        });
+        if f11 || (esc && self.fullscreen) {
+            self.toggle_fullscreen(ui.ctx());
+        }
+        if m && !typing {
+            self.show_meters = !self.show_meters;
+        }
+        if f && !typing {
+            self.show_fps = !self.show_fps;
+        }
 
         // Manual rhythm controls (keyboard).
         let (tap, resync) =
@@ -596,14 +635,47 @@ impl eframe::App for VisualEngineApp {
             self.send(Command::ResyncDownbeat);
         }
 
-        let frame = self.signals.latest().clone();
+        let sf = self.signals.latest().clone();
         let song_pos = match self.engine.source() {
             Source::File(p) => Some(p.position_secs()),
             _ => None,
         };
-        self.rhythm_view.update(&frame, song_pos);
+        self.rhythm_view.update(&sf, song_pos);
+
+        if self.fullscreen {
+            egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
+            return;
+        }
+
+        egui::Panel::left("sources")
+            .resizable(true)
+            .default_size(320.0)
+            .size_range(260.0..=520.0)
+            .frame(
+                egui::Frame::side_top_panel(ui.style())
+                    .fill(PANEL_BG)
+                    .inner_margin(12.0),
+            )
+            .show(ui, |ui| self.side_panel(ui));
+
+        egui::Panel::right("scene")
+            .resizable(true)
+            .default_size(300.0)
+            .size_range(240.0..=480.0)
+            .frame(
+                egui::Frame::side_top_panel(ui.style())
+                    .fill(PANEL_BG)
+                    .inner_margin(12.0),
+            )
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| self.scene.controls(ui));
+                ui.add_space(4.0);
+            });
+
         if self.show_meters {
-            self.update_hop_rate(frame.hop_index);
+            self.update_hop_rate(sf.hop_index);
             let rate = self.hops_per_sec;
             let view = &self.rhythm_view;
             egui::Panel::bottom("signals")
@@ -611,10 +683,10 @@ impl eframe::App for VisualEngineApp {
                 .default_size(440.0)
                 .size_range(340.0..=700.0)
                 .frame(egui::Frame::NONE.fill(PANEL_BG))
-                .show(ui, |ui| debug_panel::show(ui, &frame, rate, view));
+                .show(ui, |ui| debug_panel::show(ui, &sf, rate, view));
         }
 
-        egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui));
+        egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
     }
 }
 
