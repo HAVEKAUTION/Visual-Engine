@@ -55,7 +55,7 @@ fn run(graph: &Graph, out: NodeId, frames: u32) -> Option<(Vec<u8>, Show, Evalua
                 output_size: SIZE,
                 proxy: 1.0,
             },
-            out,
+            &[out],
         );
         r.present_from([shown, Show::Black], Master::default());
         r.end_frame();

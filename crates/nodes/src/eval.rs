@@ -97,6 +97,10 @@ pub struct Evaluator {
     compiled: HashMap<String, Result<CompiledScene, String>>,
     rt: HashMap<NodeId, NodeRt>,
     values: HashMap<NodeId, f32>,
+    /// The picture each evaluated node put out last frame (`None` = black).
+    pictures: HashMap<NodeId, Option<u64>>,
+    /// Number parameters after modulation, last frame.
+    live: HashMap<(NodeId, String), f32>,
     /// Problems by node, shown as badges.
     pub errors: BTreeMap<NodeId, String>,
 }
@@ -108,6 +112,8 @@ impl Evaluator {
             compiled: HashMap::new(),
             rt: HashMap::new(),
             values: HashMap::new(),
+            pictures: HashMap::new(),
+            live: HashMap::new(),
             errors: BTreeMap::new(),
         }
     }
@@ -185,19 +191,35 @@ impl Evaluator {
         }
     }
 
-    /// Evaluate everything `output` (a Program Out node) needs and return what
-    /// to show. Call [`Renderer::begin_frame`] before and
-    /// [`Renderer::end_frame`] after (once for all evaluators).
+    /// What a node put out last frame, ready to show (a Program Out node shows
+    /// what is plugged into it).
+    pub fn picture(&self, node: NodeId) -> Show {
+        match self.pictures.get(&node).copied().flatten() {
+            Some(k) => Show::Node(k),
+            None => Show::Black,
+        }
+    }
+
+    /// A number parameter's value after modulation, last frame.
+    pub fn live_value(&self, node: NodeId, param: &str) -> Option<f32> {
+        self.live.get(&(node, param.to_string())).copied()
+    }
+
+    /// Evaluate everything the `targets` need (the Program Out node, plus any
+    /// node being looked at) and return the picture of the first one. Call
+    /// [`Renderer::begin_frame`] before and [`Renderer::end_frame`] after
+    /// (once for all evaluators).
     pub fn run(
         &mut self,
         graph: &Graph,
         library: &SceneLibrary,
         renderer: &mut Renderer,
         input: FrameInput,
-        output: NodeId,
+        targets: &[NodeId],
     ) -> Show {
         self.errors.clear();
         self.values.clear();
+        self.live.clear();
         // Forget nodes that were deleted.
         self.rt.retain(|id, _| graph.node(*id).is_some());
 
@@ -205,9 +227,8 @@ impl Evaluator {
         let time = input.signals.get("time").unwrap_or(0.0) as f64;
         // Which picture each node puts out this frame (`None` = black).
         let mut image: HashMap<NodeId, Option<u64>> = HashMap::new();
-        let mut shown = None;
 
-        for id in graph.plan(&[output]) {
+        for id in graph.plan(targets) {
             let Some(node) = graph.node(id) else { continue };
             let first_input = |image: &HashMap<NodeId, Option<u64>>| {
                 node.inputs
@@ -257,7 +278,7 @@ impl Evaluator {
                     let src = graph
                         .input_link(id, "image")
                         .and_then(|l| image.get(&l.from.node).copied().flatten());
-                    shown = Some(src);
+                    image.insert(id, src);
                 }
                 kind => {
                     let Some(file) = registry::shader_file(kind) else {
@@ -276,7 +297,11 @@ impl Evaluator {
                         .iter()
                         .map(|p| {
                             let v = match &p.value {
-                                ParamValue::Float(_) => vec![eff(p)],
+                                ParamValue::Float(_) => {
+                                    let v = eff(p);
+                                    self.live.insert((id, p.def.name.clone()), v);
+                                    vec![v]
+                                }
                                 ParamValue::Bool(b) => vec![if *b { 1.0 } else { 0.0 }],
                                 ParamValue::Choice(i) => vec![*i as f32],
                                 ParamValue::Colour(c) => c.to_vec(),
@@ -334,10 +359,11 @@ impl Evaluator {
                 }
             }
         }
-        match shown.flatten() {
-            Some(k) => Show::Node(k),
-            None => Show::Black,
-        }
+        self.pictures = image;
+        targets
+            .first()
+            .map(|t| self.picture(*t))
+            .unwrap_or(Show::Black)
     }
 }
 

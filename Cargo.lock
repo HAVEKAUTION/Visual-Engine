@@ -295,7 +295,9 @@ dependencies = [
  "nodes",
  "render",
  "rfd",
+ "ron",
  "scenes",
+ "serde",
  "signals",
  "triple_buffer",
 ]

@@ -24,3 +24,5 @@ render.workspace = true
 scenes.workspace = true
 graph.workspace = true
 nodes.workspace = true
+ron.workspace = true
+serde.workspace = true

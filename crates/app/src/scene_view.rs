@@ -13,6 +13,7 @@ use scenes::{InputKind, ParamState, SceneLibrary, SignalState};
 use signals::SignalFrame;
 use signals::modulation::ModContext;
 
+use crate::graph_view::Workspace;
 use crate::mod_editor;
 use crate::perform::{KeyAction, MACROS, Perform};
 
@@ -25,13 +26,6 @@ struct Deck {
     file_name: String,
     pipeline: ScenePipeline,
     params: ParamState,
-}
-
-/// The temporary node-graph test (until the node editor arrives in M3).
-struct GraphTest {
-    graph: graph::Graph,
-    out: graph::NodeId,
-    eval: nodes::Evaluator,
 }
 
 /// A crossfade in progress: the live deck fades in, `from` fades out.
@@ -72,9 +66,10 @@ pub struct SceneView {
     pub fps: f32,
     pub frame_ms: f32,
     last_reload: Option<(String, Instant, bool)>,
-    /// When set, the picture comes from the test node graph.
-    graph_test: Option<GraphTest>,
-    graph_error: Option<String>,
+    /// The node graph (the v2 core).
+    pub ws: Workspace,
+    /// Show the node graph (else the classic scene panel).
+    pub graph_mode: bool,
 }
 
 /// The source-tree folder `name` (when running from a checkout, so files are
@@ -124,6 +119,7 @@ impl SceneView {
         let bank = presets
             .load_bank()
             .unwrap_or_else(|| presets.default_bank(&order));
+        let ws = Workspace::new(&library);
         let mut view = Self {
             library,
             presets,
@@ -148,8 +144,8 @@ impl SceneView {
             fps: 0.0,
             frame_ms: 0.0,
             last_reload: None,
-            graph_test: None,
-            graph_error: None,
+            ws,
+            graph_mode: true,
         };
         if let Some(first) = view.bank[0].clone() {
             view.load_preset(&first, false);
@@ -265,6 +261,9 @@ impl SceneView {
     pub fn handle_keys(&mut self, ctx: &egui::Context) {
         for a in self.perf.handle_keys(ctx) {
             match a {
+                KeyAction::Preset(_) if self.graph_mode => self
+                    .perf
+                    .toast("Preset keys work in Classic scenes (top of the right panel)"),
                 KeyAction::Preset(slot) => match self.bank[slot].clone() {
                     Some(id) => self.load_preset(&id, true),
                     None => self.perf.toast(format!("Nothing on key {}", slot + 1)),
@@ -277,9 +276,7 @@ impl SceneView {
     fn poll_files(&mut self) {
         self.presets.poll();
         for file in self.library.poll() {
-            if let Some(t) = self.graph_test.as_mut() {
-                t.eval.invalidate(&file);
-            }
+            self.ws.file_changed(&file, &self.library);
             if self.library.get(&file).is_none() {
                 self.errors.remove(&file);
                 continue;
@@ -385,9 +382,11 @@ impl SceneView {
             return;
         };
         renderer.begin_frame(size);
-        if let Some(t) = self.graph_test.as_mut() {
-            let show = t.eval.run(
-                &t.graph,
+        if self.graph_mode {
+            self.ws.tick();
+            let targets = self.ws.targets();
+            self.ws.eval.run(
+                &self.ws.graph,
                 &self.library,
                 renderer,
                 nodes::FrameInput {
@@ -398,8 +397,13 @@ impl SceneView {
                     output_size: size,
                     proxy: 1.0,
                 },
-                t.out,
+                &targets,
             );
+            let show = self
+                .ws
+                .viewed()
+                .map(|v| self.ws.eval.picture(v))
+                .unwrap_or(Show::Black);
             renderer.present_from(
                 [show, Show::Black],
                 Master {
@@ -413,7 +417,7 @@ impl SceneView {
         let time = self.signals.get("time").unwrap_or(0.0) as f64;
         for (i, deck) in self.decks.iter_mut().enumerate() {
             let Some(deck) = deck else { continue };
-            if self.graph_test.is_some() {
+            if self.graph_mode {
                 break; // the graph is showing; decks wait
             }
             {
@@ -436,7 +440,7 @@ impl SceneView {
                 deck.params.block(),
             );
         }
-        if self.graph_test.is_none() {
+        if !self.graph_mode {
             renderer.present(Master {
                 mix_b,
                 gain: self.perf.gain(),
@@ -477,6 +481,20 @@ impl SceneView {
         );
     }
 
+    /// The node graph editor (bottom panel).
+    pub fn graph_panel(&mut self, ui: &mut egui::Ui) {
+        self.ws.editor_ui(ui, &self.library);
+    }
+
+    /// Caption for the viewer ("Viewing 03 Aurora Drift").
+    pub fn viewer_caption(&self) -> Option<String> {
+        if self.graph_mode {
+            self.ws.viewer_caption()
+        } else {
+            None
+        }
+    }
+
     pub fn render_size(&self) -> Option<(u32, u32)> {
         self.renderer.as_ref().and_then(|r| r.size())
     }
@@ -490,8 +508,16 @@ impl SceneView {
             ui.label(RichText::new("No GPU renderer available.").color(ERROR_COLOR));
             return;
         }
-        self.graph_test_ui(ui);
-        if self.graph_test.is_some() {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.graph_mode, true, "Node graph");
+            ui.selectable_value(&mut self.graph_mode, false, "Classic scenes")
+                .on_hover_text(
+                    "The old one-scene view with presets (keys 1–9). Being replaced by Looks.",
+                );
+        });
+        ui.add_space(6.0);
+        if self.graph_mode {
+            self.ws.inspector_ui(ui);
             return;
         }
         self.scene_picker(ui);
@@ -554,92 +580,6 @@ impl SceneView {
                 open_folder(&dir);
             }
         }
-    }
-
-    /// The node-graph test switch and, when on, a read-only view of the graph.
-    fn graph_test_ui(&mut self, ui: &mut egui::Ui) {
-        let mut on = self.graph_test.is_some();
-        let label = RichText::new("🧪 Node graph test").strong();
-        if ui
-            .toggle_value(&mut on, label)
-            .on_hover_text(
-                "Show a small test node graph instead of the scene. \
-                 Temporary: the real node editor comes next.",
-            )
-            .changed()
-        {
-            if on {
-                match nodes::demo::build(&self.library) {
-                    Ok((graph, out)) => {
-                        self.graph_test = Some(GraphTest {
-                            graph,
-                            out,
-                            eval: nodes::Evaluator::new(1 << 32),
-                        });
-                        self.graph_error = None;
-                    }
-                    Err(e) => self.graph_error = Some(e),
-                }
-            } else {
-                self.graph_test = None;
-            }
-        }
-        if let Some(e) = &self.graph_error {
-            ui.label(RichText::new(e).color(ERROR_COLOR));
-        }
-        let Some(t) = self.graph_test.as_mut() else {
-            ui.add_space(6.0);
-            return;
-        };
-        ui.label(
-            RichText::new(
-                "The picture now comes from this node graph. Untick a node to \
-                 bypass it (its picture passes straight through).",
-            )
-            .small()
-            .weak(),
-        );
-        ui.add_space(4.0);
-        ui.label(RichText::new("NODES").strong());
-        let ids: Vec<graph::NodeId> = t.graph.nodes().iter().map(|n| n.id).collect();
-        for id in ids {
-            let Some(n) = t.graph.node(id) else { continue };
-            let mut active = !n.bypass;
-            let mut text = format!("{:02} {}", id.0, n.label);
-            if let Some(v) = t.eval.signal_value(id) {
-                text += &format!("   {v:.2}");
-            }
-            ui.horizontal(|ui| {
-                if ui.checkbox(&mut active, text).changed() {
-                    let _ = t.graph.apply(graph::Command::SetBypass {
-                        node: id,
-                        bypass: !active,
-                    });
-                }
-                if let Some(v) = t.eval.signal_value(id) {
-                    let (r, _) =
-                        ui.allocate_exact_size(egui::vec2(50.0, 8.0), egui::Sense::hover());
-                    ui.painter().rect_filled(r, 2.0, Color32::from_gray(40));
-                    let mut f = r;
-                    f.set_width(r.width() * v.clamp(0.0, 1.0));
-                    ui.painter().rect_filled(f, 2.0, ACCENT);
-                }
-            });
-            if let Some(e) = t.eval.errors.get(&id) {
-                ui.label(
-                    RichText::new(format!("   ⚠ {e}"))
-                        .small()
-                        .color(ERROR_COLOR),
-                );
-            }
-        }
-        ui.add_space(4.0);
-        ui.label(RichText::new("WIRES").strong());
-        let nodes_count = t.graph.nodes().len();
-        for line in nodes::demo::describe(&t.graph).iter().skip(nodes_count) {
-            ui.label(RichText::new(line).small().monospace());
-        }
-        ui.add_space(8.0);
     }
 
     fn scene_picker(&mut self, ui: &mut egui::Ui) {

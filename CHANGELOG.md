@@ -2,6 +2,25 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M3 part 1: the node editor
+- The node graph is now the main view: a Resolve-style editor across the bottom of the
+  window (Tab hides/shows it). The old one-scene panel is still there as "Classic
+  scenes" at the top of the right panel.
+- Right-click to add nodes (Sources, Effects, Signals, Output), or Shift+Space /
+  double-click to search. Drag from a plug to wire; drag a wire off an input to unplug.
+  Wires are colour-coded (picture grey, mask green, signal blue) and signal wires glow
+  with their value.
+- Drop a blue Signal wire on a node (pick a slider) or on a slider in the Inspector to
+  make the music drive it. Hits (kick, snare…) get a decaying shape automatically.
+- Click a node to see its picture in the viewer and edit it in the Inspector: name,
+  on/bypass, resolution, every setting, modulation editor, and the wires driving each
+  slider (shape, depth, on/off, unplug).
+- Box select, Shift/Ctrl+click, Ctrl+A, Del, Ctrl+D bypass, Ctrl+C/X/V (pastes between
+  graphs too), duplicate, Ctrl+Z / Ctrl+Shift+Z, Home to fit. Scroll zooms, middle-drag
+  (or Space/Alt+drag) pans.
+- Autosave every 30 s and on exit; your graph comes back on the next launch.
+- Replaces the temporary "Node graph test" switch.
+
 ## 2026-11-10 — v2 M2 part 2: the graph runs on the GPU (first visible nodes)
 - New `nodes` crate: node types (every scene and effect file becomes a node, plus Audio
   Signal, LFO and Program Out) and the evaluator that runs a graph every frame.

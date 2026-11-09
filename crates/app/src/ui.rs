@@ -42,6 +42,8 @@ pub struct VisualEngineApp {
     fullscreen: bool,
     show_waveform: bool,
     show_fps: bool,
+    /// Node graph panel visible (Tab).
+    show_graph: bool,
 }
 
 impl VisualEngineApp {
@@ -90,6 +92,7 @@ impl VisualEngineApp {
             fullscreen: false,
             show_waveform: false,
             show_fps: true,
+            show_graph: true,
         };
         app.rescan_inputs();
         if let Some(path) = startup_song {
@@ -508,6 +511,16 @@ impl VisualEngineApp {
             );
             painter.galley(pos, galley, label_color);
         }
+        if let Some(cap) = self.scene.viewer_caption().filter(|_| !self.fullscreen) {
+            let galley = painter.layout_no_wrap(cap, egui::FontId::proportional(12.5), label_color);
+            let pos = rect.left_bottom() + Vec2::new(10.0, -galley.size().y - 10.0);
+            painter.rect_filled(
+                Rect::from_min_size(pos - Vec2::splat(4.0), galley.size() + Vec2::splat(8.0)),
+                CornerRadius::same(3),
+                Color32::from_black_alpha(160),
+            );
+            painter.galley(pos, galley, crate::graph_editor::ACCENT);
+        }
         self.scene
             .perf
             .draw_overlay(&painter, rect, !self.fullscreen);
@@ -630,6 +643,23 @@ impl eframe::App for VisualEngineApp {
         // plus the performance keys (see perform.rs / H in the app).
         // (Ignored while typing in a text field.)
         let typing = ui.ctx().egui_wants_keyboard_input();
+        // Node-graph keys go first so the performance keys don't eat them
+        // (Shift+Space = add node, Tab = hide/show the graph).
+        if !typing && self.scene.graph_mode {
+            let (search, tab) = ui.input_mut(|i| {
+                (
+                    i.consume_key(egui::Modifiers::SHIFT, egui::Key::Space),
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Tab),
+                )
+            });
+            if search {
+                self.show_graph = true;
+                self.scene.ws.editor.open_search(ui.ctx());
+            }
+            if tab {
+                self.show_graph = !self.show_graph;
+            }
+        }
         self.scene.handle_keys(ui.ctx());
         let (f11, esc, m, f) = ui.input(|i| {
             (
@@ -671,6 +701,27 @@ impl eframe::App for VisualEngineApp {
             return;
         }
 
+        if self.show_meters {
+            self.update_hop_rate(sf.hop_index);
+            let rate = self.hops_per_sec;
+            let view = &self.rhythm_view;
+            egui::Panel::bottom("signals")
+                .resizable(true)
+                .default_size(440.0)
+                .size_range(340.0..=700.0)
+                .frame(egui::Frame::NONE.fill(PANEL_BG))
+                .show(ui, |ui| debug_panel::show(ui, &sf, rate, view));
+        }
+
+        if self.scene.graph_mode && self.show_graph {
+            egui::Panel::bottom("graph")
+                .resizable(true)
+                .default_size(320.0)
+                .size_range(160.0..=900.0)
+                .frame(egui::Frame::NONE.fill(crate::graph_editor::CANVAS_BG))
+                .show(ui, |ui| self.scene.graph_panel(ui));
+        }
+
         egui::Panel::left("sources")
             .resizable(true)
             .default_size(320.0)
@@ -697,18 +748,6 @@ impl eframe::App for VisualEngineApp {
                     .show(ui, |ui| self.scene.controls(ui));
                 ui.add_space(4.0);
             });
-
-        if self.show_meters {
-            self.update_hop_rate(sf.hop_index);
-            let rate = self.hops_per_sec;
-            let view = &self.rhythm_view;
-            egui::Panel::bottom("signals")
-                .resizable(true)
-                .default_size(440.0)
-                .size_range(340.0..=700.0)
-                .frame(egui::Frame::NONE.fill(PANEL_BG))
-                .show(ui, |ui| debug_panel::show(ui, &sf, rate, view));
-        }
 
         egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
     }

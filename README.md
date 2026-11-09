@@ -21,7 +21,9 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
   See `DIRECTION_UPDATE_v2.md`; the parts above that v2 replaces are listed in `CLAUDE.md`.
 - **v2 M2 – graph engine**: in progress. Part 1: the graph data model
   (`crates/graph`). Part 2: GPU evaluation (`crates/nodes`) with a temporary test graph
-  in the app. Next: scenes → nodes rename, modulation unification, autosave.
+  in the app.
+- **v2 M3 – workspace + node editor**: in progress. Part 1 done: the node editor
+  (right-click add, wiring, Inspector with modulation, copy/paste, undo, autosave).
 
 ## Running it
 

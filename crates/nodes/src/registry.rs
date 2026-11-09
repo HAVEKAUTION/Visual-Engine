@@ -133,3 +133,98 @@ pub fn spec_for(kind: &str, library: &scenes::SceneLibrary) -> Result<NodeSpec, 
     let meta = SceneMeta::parse(&entry.source, file.trim_end_matches(".wgsl"))?;
     Ok(shader_spec(file, &meta))
 }
+
+/// Where a node type sits in the add menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Category {
+    /// Makes a picture from nothing (scenes = Shader Generators).
+    Source,
+    /// Changes or combines pictures.
+    Effect,
+    /// Makes a number that can drive any slider.
+    Signal,
+    Output,
+}
+
+impl Category {
+    pub const ALL: [Category; 4] = [
+        Category::Source,
+        Category::Effect,
+        Category::Signal,
+        Category::Output,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Category::Source => "Sources",
+            Category::Effect => "Effects",
+            Category::Signal => "Signals",
+            Category::Output => "Output",
+        }
+    }
+}
+
+/// One entry in the add menu.
+#[derive(Clone, Debug)]
+pub struct CatalogueEntry {
+    pub kind: String,
+    pub label: String,
+    pub category: Category,
+    pub description: String,
+}
+
+/// Every node type that can be added, sorted by category then name.
+pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
+    let mut out: Vec<CatalogueEntry> = library
+        .entries()
+        .iter()
+        .filter_map(|e| {
+            let meta = SceneMeta::parse(&e.source, e.file_name.trim_end_matches(".wgsl")).ok()?;
+            Some(CatalogueEntry {
+                kind: shader_kind(&e.file_name),
+                label: meta.name.clone(),
+                category: if meta.is_effect() {
+                    Category::Effect
+                } else {
+                    Category::Source
+                },
+                description: meta.description.clone(),
+            })
+        })
+        .collect();
+    let builtin = [
+        (
+            AUDIO_SIGNAL,
+            Category::Signal,
+            "Any sound signal: bass, kick hits, loudness, beat phase… Wire it into a slider.",
+        ),
+        (
+            LFO,
+            Category::Signal,
+            "A wave locked to the beat. Wire it into a slider for steady, musical motion.",
+        ),
+        (PROGRAM_OUT, Category::Output, "The final picture."),
+    ];
+    for (kind, category, description) in builtin {
+        if let Some(spec) = builtin_spec(kind) {
+            out.push(CatalogueEntry {
+                kind: kind.into(),
+                label: spec.label,
+                category,
+                description: description.into(),
+            });
+        }
+    }
+    out.sort_by(|a, b| (a.category, &a.label).cmp(&(b.category, &b.label)));
+    out
+}
+
+/// The category of a node kind (for its colour in the editor).
+pub fn category_of(kind: &str, outputs_image: bool, has_image_inputs: bool) -> Category {
+    match kind {
+        AUDIO_SIGNAL | LFO => Category::Signal,
+        PROGRAM_OUT => Category::Output,
+        _ if outputs_image && !has_image_inputs => Category::Source,
+        _ => Category::Effect,
+    }
+}

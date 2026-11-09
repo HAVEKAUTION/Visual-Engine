@@ -2,6 +2,8 @@
 
 mod analysis_thread;
 mod debug_panel;
+mod graph_editor;
+mod graph_view;
 mod mod_editor;
 mod offline;
 mod perform;

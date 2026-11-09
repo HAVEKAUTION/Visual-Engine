@@ -316,7 +316,47 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
-## v2 M2 part 2 – First visible node graph
+## v2 M3 part 1 – The node editor
+
+Run: `cargo run --release -p app`
+
+The node graph fills the bottom of the window. Open a song (or press **🔊 Computer
+audio**) so things move.
+
+**Try this tour (5 minutes):**
+1. [ ] Click **02 Transform**. It gets an orange outline, the viewer shows *its* picture
+       ("Viewing 02 Transform" bottom-left) and the Inspector (right) shows its sliders.
+       Click empty graph space: the viewer goes back to the full output.
+2. [ ] In the Inspector, drag **Spin speed**: the tunnel turns faster. Press **Ctrl+Z**:
+       it goes back.
+3. [ ] Right-click empty graph space → **Effects → Mirror** (or Glow). A new node 08
+       appears where you clicked.
+4. [ ] Rewire: drag the wire end off Merge's **Foreground** plug and drop it on nothing
+       (it unplugs). Now drag from Transform's output plug (right side) to the new
+       node's **Picture** plug, then from the new node's output to Merge's
+       **Foreground**. The effect is now in the chain.
+5. [ ] Make the music drive it: right-click → **Signals → Audio Signal**. In the
+       Inspector pick **Kick hit**. Drag from its blue plug onto the new effect node
+       and choose a slider (or drop it straight onto a slider in the Inspector). The
+       slider now jumps with each kick. Try the wire's **depth** number and the
+       **~** button (modulation editor) under that slider.
+6. [ ] Select a node and press **Ctrl+D**: bypassed (dimmed, "off"). Again: back on.
+7. [ ] Drag a box around a few nodes, **Ctrl+C**, move the mouse, **Ctrl+V**: copies
+       with new numbers, wires kept. **Del** removes them. **Ctrl+Z** brings them back.
+8. [ ] Scroll to zoom, middle-drag (or hold Space and drag) to pan, **Home** to fit all.
+9. [ ] **Shift+Space**: a search box. Type "glow", Enter: a Glow node appears.
+10. [ ] **Tab** hides the graph (bigger viewer); Tab again shows it.
+11. [ ] Close the app and start it again: "Welcome back…", your graph is as you left it.
+12. [ ] Right-click empty space → **Clear graph**: empty canvas message. Ctrl+Z restores
+        it. **Add starter graph** adds the example again.
+13. [ ] Top of the right panel → **Classic scenes**: the old view with presets (keys 1–9)
+        still works. **Node graph** goes back.
+
+Known gaps (next parts of M3): no S/P/L quick-add keys, no groups yet, no split-wipe
+compare, no per-node GPU cost, no new theme or signal strip yet. Images, video and
+cameras as nodes come in M4.
+
+## v2 M2 part 2 – First visible node graph (replaced by the editor above)
 
 Run: `cargo run --release -p app`
 

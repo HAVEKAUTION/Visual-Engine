@@ -8,10 +8,10 @@ use signals::modulation::{ModSlot, Shape, Source, Wave};
 
 use crate::perform::MACROS;
 
-const MOD_COLOR: Color32 = Color32::from_rgb(255, 170, 60);
+pub const MOD_COLOR: Color32 = Color32::from_rgb(255, 170, 60);
 
 /// Friendly names for signals that make good modulation sources.
-const SIGNAL_SOURCES: &[(&str, &str)] = &[
+pub const SIGNAL_SOURCES: &[(&str, &str)] = &[
     ("kick_age", "Kick hit"),
     ("snare_age", "Snare hit"),
     ("hat_age", "Hi-hat hit"),
@@ -68,7 +68,7 @@ pub fn default_shape(s: &Source) -> Shape {
     }
 }
 
-fn new_slot(source: Source) -> ModSlot {
+pub fn new_slot(source: Source) -> ModSlot {
     let depth = match &source {
         Source::Signal(n) if !n.ends_with("_age") && !n.ends_with("_phase") => 0.1,
         _ => 0.25,
@@ -84,7 +84,7 @@ fn random_seed() -> u32 {
 }
 
 /// Menu of sources; returns the chosen one.
-fn source_menu(ui: &mut egui::Ui) -> Option<Source> {
+pub fn source_menu(ui: &mut egui::Ui) -> Option<Source> {
     let mut pick = None;
     ui.label(RichText::new("Audio").small().weak());
     for (name, label) in SIGNAL_SOURCES {
@@ -119,7 +119,7 @@ fn source_menu(ui: &mut egui::Ui) -> Option<Source> {
     pick
 }
 
-const SHAPES: [Shape; 6] = [
+pub const SHAPES: [Shape; 6] = [
     Shape::Linear,
     Shape::Curve { gamma: 2.0 },
     Shape::Envelope { decay: 0.15 },
@@ -129,7 +129,7 @@ const SHAPES: [Shape; 6] = [
 ];
 
 /// Edit one modulation. Returns true if it should be removed.
-fn slot_ui(ui: &mut egui::Ui, slot: &mut ModSlot, id: usize) -> bool {
+pub fn slot_ui(ui: &mut egui::Ui, slot: &mut ModSlot, id: usize) -> bool {
     let mut remove = false;
     ui.horizontal(|ui| {
         ui.checkbox(&mut slot.enabled, "");

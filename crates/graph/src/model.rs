@@ -336,6 +336,14 @@ impl Graph {
         }
     }
 
+    /// Hand out the next node number without making a node (for pasting
+    /// copies of existing nodes).
+    pub fn reserve_node_id(&mut self) -> NodeId {
+        let id = NodeId(self.next_node);
+        self.next_node += 1;
+        id
+    }
+
     /// The next free group number (reserve it by adding the group).
     pub fn new_group_id(&mut self) -> GroupId {
         let id = GroupId(self.next_group);
