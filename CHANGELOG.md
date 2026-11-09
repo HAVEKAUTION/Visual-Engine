@@ -2,6 +2,15 @@
 
 One short entry per task, newest first.
 
+## 2026-11-09 — Rebuilt Iron Furnace (metal) and Velvet Mirrorball (house / disco)
+- Iron Furnace: a furnace seen through rings of spinning sawblades. Guitars feed the
+  core and spin the blades, kicks punch and throw bursts of sparks, snares crack it with
+  lightning, drops go white-hot. 11 controls, palette-driven, 3 presets.
+- Velvet Mirrorball: velvet curtains, a lit dance floor that changes pattern on every
+  kick, a faceted mirrorball with hi-hat sparkles, sweeping beams in the haze and light
+  spots circling the room. Colours rotate every 4 bars. 12 controls, 3 presets.
+- Keys 8 and 9 now load Forge and Saturday Night.
+
 ## 2026-11-09 — M3: modulation, presets, colour palettes, performance keys
 - Every slider has a **~** button: link it to the music (any signal), a beat-synced
   LFO, a macro knob or a slow random wander, shaped as curve / beat envelope / phase

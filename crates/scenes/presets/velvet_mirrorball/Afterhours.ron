@@ -1,0 +1,20 @@
+(
+    name: "Afterhours",
+    scene: "velvet_mirrorball.wgsl",
+    values: {
+        "spin_speed": [0.12],
+        "beams": [6.0],
+        "haze": [1.2],
+        "curtain": [0.4],
+        "floor_bright": [0.5],
+    },
+    mods: {
+        "beam_speed": [
+            (source: Lfo(wave: Sine, beats: 32.0), shape: Linear, depth: 0.3, enabled: true),
+        ],
+        "haze": [
+            (source: Signal("kick_age"), shape: Envelope(decay: 0.15), depth: 0.15, enabled: true),
+        ],
+    },
+    palette: Named("Vapor"),
+)

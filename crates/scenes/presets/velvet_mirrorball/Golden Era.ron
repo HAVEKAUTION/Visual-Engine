@@ -1,0 +1,16 @@
+(
+    name: "Golden Era",
+    scene: "velvet_mirrorball.wgsl",
+    values: {
+        "beams": [2.0],
+        "spot_size": [0.3],
+        "floor_tiles": [4.0],
+        "colour_turn": [0.0],
+    },
+    mods: {
+        "spot_bright": [
+            (source: Signal("beat_phase"), shape: Pulse(k: 3.0), depth: 0.3, enabled: true),
+        ],
+    },
+    palette: Named("Gold"),
+)

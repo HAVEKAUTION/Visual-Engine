@@ -1,0 +1,9 @@
+(
+    name: "Forge",
+    scene: "iron_furnace.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

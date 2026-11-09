@@ -1,0 +1,9 @@
+(
+    name: "Saturday Night",
+    scene: "velvet_mirrorball.wgsl",
+    values: {
+    },
+    mods: {
+    },
+    palette: Scene,
+)

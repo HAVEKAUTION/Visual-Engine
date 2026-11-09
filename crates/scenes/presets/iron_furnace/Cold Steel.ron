@@ -1,0 +1,17 @@
+(
+    name: "Cold Steel",
+    scene: "iron_furnace.wgsl",
+    values: {
+        "heat": [0.7],
+        "ring_count": [5.0],
+        "teeth": [8.0],
+        "lightning": [1.4],
+        "grain": [0.6],
+    },
+    mods: {
+        "spin_speed": [
+            (source: Signal("snare_age"), shape: Envelope(decay: 0.3), depth: 0.3, enabled: true),
+        ],
+    },
+    palette: Named("Ice"),
+)

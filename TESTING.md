@@ -262,7 +262,7 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
 **Performance keys**
 - [ ] **1–9**: smooth crossfade to that preset (default 4 beats, set under PERFORMANCE).
       Default keys: 1 Concrete, 2 Acid Corridor, 3 Deep Jungle, 4 Clean Ring,
-      5 Night Drive, 6 Rainy Night, 7 Northern Sky, 8 Peak Kaleido, 9 Red Room.
+      5 Night Drive, 6 Rainy Night, 7 Northern Sky, 8 Forge, 9 Saturday Night.
 - [ ] **Space**: blackout; Space again brings it back.
 - [ ] **F**: one white flash, exactly on the next beat.
 - [ ] **↑ / ↓**: modulations get stronger / weaker (shown at the bottom of the picture).
@@ -274,5 +274,28 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
 
 **Known limits**
 - Colour pickers inside a scene can't be modulated yet, only number sliders.
-- Iron Furnace and Velvet Mirrorball have no example presets yet (being rebuilt next).
 - Crossfades restart the trails of the incoming scene.
+
+## Rebuilt scenes – Iron Furnace and Velvet Mirrorball
+
+**Iron Furnace** (metal; key 8). Best with a metal / hardcore track.
+- [ ] A glowing molten core with 4 rings of saw-toothed iron around it; neighbouring
+      rings turn in opposite directions.
+- [ ] Heavier guitars = bigger, hotter core and faster blades. Quiet intro = dimmer.
+- [ ] Every kick: the view punches in and a burst of sparks shoots outwards. Double-kick
+      passages = constant spark storm.
+- [ ] Every snare: white lightning cracks across the rings.
+- [ ] Drop / breakdown: a white-hot blast.
+- [ ] Try *Blade rings*, *Teeth*, *Tooth depth* and the presets *Blast Furnace* and
+      *Cold Steel* (blue fire).
+
+**Velvet Mirrorball** (house / disco; key 9). Best with a four-to-the-floor track.
+- [ ] Velvet curtains at the back, a tiled dance floor at the front, a mirrorball at
+      the top with a wire.
+- [ ] Every kick: the floor lights a new pattern of coloured tiles and the light spots
+      flash.
+- [ ] The light spots circle around the ball; more bass = faster.
+- [ ] Coloured beams swing through the haze from the ball.
+- [ ] Hi-hats: tiles on the ball sparkle white.
+- [ ] Every 4 bars the light colours rotate (*Colour rotation* at 0 stops that).
+- [ ] Try the presets *Golden Era* and *Afterhours*.
