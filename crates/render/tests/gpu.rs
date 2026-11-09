@@ -64,6 +64,10 @@ fn built_in_scenes_draw_something() {
     };
     let mut r = Renderer::new(&device, &queue);
     for b in scenes::builtin::BUILTIN {
+        // Effects need a picture plugged in; the graph tests cover them.
+        if b.file_name.starts_with("fx_") {
+            continue;
+        }
         r.clear_feedback(0);
         let px = render_scene(&mut r, b.source, b.file_name, 30);
         if let Ok(dir) = std::env::var("VE_DUMP_DIR") {

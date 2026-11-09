@@ -513,6 +513,8 @@ impl SceneView {
             .library
             .entries()
             .iter()
+            // Effects (fx_*.wgsl) are added as layers, not picked as scenes.
+            .filter(|e| scenes::SceneMeta::parse(&e.source, "x").map_or(true, |m| !m.is_effect()))
             .map(|e| {
                 let stem = e.file_name.trim_end_matches(".wgsl");
                 let (name, genres) = scenes::SceneMeta::parse(&e.source, stem)
@@ -658,6 +660,18 @@ impl SceneView {
                     if ui.checkbox(&mut on, input.label()).changed() {
                         p.values[i][0] = if on { 1.0 } else { 0.0 };
                     }
+                }
+                InputKind::Choice => {
+                    let cur = p.values[i][0].round().max(0.0) as usize;
+                    egui::ComboBox::from_label(input.label())
+                        .selected_text(input.options.get(cur).cloned().unwrap_or_default())
+                        .show_ui(ui, |ui| {
+                            for (k, o) in input.options.iter().enumerate() {
+                                if ui.selectable_label(k == cur, o).clicked() {
+                                    p.values[i][0] = k as f32;
+                                }
+                            }
+                        });
                 }
                 InputKind::Color => {
                     ui.horizontal(|ui| {

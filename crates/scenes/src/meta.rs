@@ -46,6 +46,14 @@ pub struct SceneMeta {
     pub genres: Vec<String>,
     #[serde(default, alias = "ISFVSN", alias = "VSN")]
     pub version: serde_json::Value,
+    /// `"scene"` (makes a picture from nothing) or `"effect"` (changes or
+    /// combines the pictures plugged into its `images`).
+    #[serde(default, alias = "KIND")]
+    pub kind: ModuleKind,
+    /// Picture inputs of an effect (at most two), read in WGSL with
+    /// `img_<name>(uv)` (or `image_a(uv)` / `image_b(uv)`).
+    #[serde(default, alias = "IMAGES")]
+    pub images: Vec<ImageDef>,
     #[serde(default, alias = "INPUTS")]
     pub inputs: Vec<InputDef>,
     #[serde(default, alias = "CLOCKS")]
@@ -62,6 +70,40 @@ pub enum InputKind {
     Float,
     Bool,
     Color,
+    /// One of a list of named options (`"options": [...]`); the shader
+    /// gets the index as an `f32`.
+    Choice,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModuleKind {
+    #[default]
+    Scene,
+    Effect,
+}
+
+/// Maximum picture inputs of an effect.
+pub const MAX_IMAGES: usize = 2;
+
+/// A picture input of an effect.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImageDef {
+    #[serde(alias = "NAME")]
+    pub name: String,
+    #[serde(default, alias = "LABEL")]
+    pub label: String,
+}
+
+impl ImageDef {
+    pub fn label(&self) -> &str {
+        if self.label.is_empty() {
+            &self.name
+        } else {
+            &self.label
+        }
+    }
 }
 
 /// A user-facing control, shown as a slider / checkbox / colour picker.
@@ -80,6 +122,9 @@ pub struct InputDef {
     pub max: Option<f32>,
     #[serde(default, alias = "DEFAULT")]
     pub default: Option<serde_json::Value>,
+    /// Names of the options of a `choice` input.
+    #[serde(default, alias = "OPTIONS", alias = "LABELS")]
+    pub options: Vec<String>,
 }
 
 impl InputDef {
@@ -91,10 +136,11 @@ impl InputDef {
         }
     }
 
-    /// (min, max) for floats; (0, 1) otherwise.
+    /// (min, max) for floats; (0, options − 1) for choices; (0, 1) otherwise.
     pub fn range(&self) -> (f32, f32) {
         match self.kind {
             InputKind::Float => (self.min.unwrap_or(0.0), self.max.unwrap_or(1.0)),
+            InputKind::Choice => (0.0, self.options.len().saturating_sub(1) as f32),
             _ => (0.0, 1.0),
         }
     }
@@ -111,6 +157,16 @@ impl InputDef {
                     .map(|v| v as f32)
                     .unwrap_or(lo);
                 vec![v.clamp(lo.min(hi), hi.max(lo))]
+            }
+            InputKind::Choice => {
+                let i = match &self.default {
+                    Some(serde_json::Value::String(s)) => {
+                        self.options.iter().position(|o| o == s).unwrap_or(0) as f32
+                    }
+                    Some(v) => v.as_f64().unwrap_or(0.0).round() as f32,
+                    None => 0.0,
+                };
+                vec![i.clamp(lo, hi)]
             }
             InputKind::Bool => {
                 let on = match &self.default {
@@ -234,6 +290,15 @@ fn header_json(source: &str) -> Option<&str> {
 }
 
 impl SceneMeta {
+    pub fn is_effect(&self) -> bool {
+        self.kind == ModuleKind::Effect
+    }
+
+    /// Index of the picture input called `name`.
+    pub fn image_index(&self, name: &str) -> Option<usize> {
+        self.images.iter().position(|i| i.name == name)
+    }
+
     /// Parse the header of `source`. A file without a header gets `fallback_name`
     /// and no inputs.
     pub fn parse(source: &str, fallback_name: &str) -> Result<Self, String> {
@@ -262,6 +327,7 @@ impl SceneMeta {
             .iter()
             .map(|i| i.name.as_str())
             .chain(self.clocks.iter().map(|c| c.name.as_str()))
+            .chain(self.images.iter().map(|i| i.name.as_str()))
         {
             if !is_identifier(n) {
                 return Err(format!(
@@ -279,6 +345,30 @@ impl SceneMeta {
             {
                 return Err(format!("input \"{}\": min must be below max", i.name));
             }
+            if i.kind == InputKind::Choice && i.options.is_empty() {
+                return Err(format!(
+                    "input \"{}\": a choice needs \"options\": [\"...\", ...]",
+                    i.name
+                ));
+            }
+        }
+        match self.kind {
+            ModuleKind::Scene if !self.images.is_empty() => {
+                return Err(
+                    "a scene can't have \"images\" (set \"kind\": \"effect\" to make an effect)"
+                        .into(),
+                );
+            }
+            ModuleKind::Effect if self.images.is_empty() => {
+                return Err(
+                    "an effect needs at least one picture input: \"images\": [{\"name\": \"input\"}]"
+                        .into(),
+                );
+            }
+            _ => {}
+        }
+        if self.images.len() > MAX_IMAGES {
+            return Err(format!("at most {MAX_IMAGES} picture inputs"));
         }
         crate::palette::from_hex_list(&self.palette)?;
         for c in &self.clocks {
@@ -361,6 +451,25 @@ impl SceneMeta {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn effects_and_choices() {
+        let src = r#"/*{"name": "Mix", "kind": "effect",
+            "images": [{"name": "base"}, {"name": "top", "label": "Foreground"}],
+            "inputs": [{"name": "mode", "type": "choice", "options": ["Normal", "Add", "Screen"], "default": "Screen"}]}*/"#;
+        let m = SceneMeta::parse(src, "f").unwrap();
+        assert!(m.is_effect());
+        assert_eq!(m.image_index("top"), Some(1));
+        assert_eq!(m.images[1].label(), "Foreground");
+        assert_eq!(m.inputs[0].default_value(), vec![2.0]);
+        assert_eq!(m.inputs[0].range(), (0.0, 2.0));
+        // A scene can't take pictures; an effect must; choices need options.
+        assert!(SceneMeta::parse(r#"/*{"images": [{"name": "x"}]}*/"#, "f").is_err());
+        assert!(SceneMeta::parse(r#"/*{"kind": "effect"}*/"#, "f").is_err());
+        assert!(
+            SceneMeta::parse(r#"/*{"inputs": [{"name": "c", "type": "choice"}]}*/"#, "f").is_err()
+        );
+    }
 
     #[test]
     fn parses_header() {

@@ -252,6 +252,8 @@ impl Renderer {
                 texture_entry(3),
                 texture_entry(4),
                 texture_entry(5),
+                texture_entry(6),
+                texture_entry(7),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -480,6 +482,15 @@ impl Renderer {
                     wgpu::BindGroupEntry {
                         binding: 5,
                         resource: wgpu::BindingResource::TextureView(buf_view(1)),
+                    },
+                    // Effect picture inputs: wired up by the node graph (next step).
+                    wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::TextureView(&self.black.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::TextureView(&self.black.view),
                     },
                 ],
             });

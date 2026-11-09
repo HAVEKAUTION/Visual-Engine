@@ -31,6 +31,15 @@ pub fn full_source(user: &str, meta: &SceneMeta) -> String {
     s += &uniforms::wgsl_struct();
     s += "\n";
     s += &ParamLayout::wgsl_struct(meta);
+    // Named readers for an effect's picture inputs: `img_base(uv)`, ...
+    for (i, img) in meta.images.iter().enumerate() {
+        let tex = if i == 0 { "image_a" } else { "image_b" };
+        s += &format!(
+            "fn img_{}(uv: vec2<f32>) -> vec4<f32> {{ return {tex}(uv); }}
+",
+            img.name
+        );
+    }
     s
 }
 
@@ -106,6 +115,17 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
             "@fragment\nfn other(in: VsOut) -> @location(0) vec4<f32> { return vec4<f32>(1.0); }\n";
         let e = compile(src, "y.wgsl").unwrap_err();
         assert!(e.contains("fs_main"), "{e}");
+    }
+
+    #[test]
+    fn effects_get_named_image_readers() {
+        let src = r#"/*{"kind": "effect", "images": [{"name": "base"}, {"name": "top"}]}*/
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return img_base(in.uv) + img_top(in.uv) * luma(image_b(in.uv).rgb);
+}
+"#;
+        compile(src, "fx.wgsl").unwrap();
     }
 
     #[test]

@@ -10,6 +10,9 @@
 @group(0) @binding(3) var prev_frame: texture_2d<f32>;
 @group(0) @binding(4) var buf_a: texture_2d<f32>;
 @group(0) @binding(5) var buf_b: texture_2d<f32>;
+// Picture inputs of an effect (black for scenes / when nothing is plugged in).
+@group(0) @binding(6) var image_in_a: texture_2d<f32>;
+@group(0) @binding(7) var image_in_b: texture_2d<f32>;
 
 const PI: f32 = 3.14159265;
 const TAU: f32 = 6.28318531;
@@ -125,4 +128,19 @@ fn sample_a(uv: vec2<f32>) -> vec4<f32> {
 
 fn sample_b(uv: vec2<f32>) -> vec4<f32> {
     return textureSampleLevel(buf_b, smp, uv, 0.0);
+}
+
+// An effect's first / second picture input at uv (see "images" in the header;
+// `img_<name>(uv)` does the same by name).
+fn image_a(uv: vec2<f32>) -> vec4<f32> {
+    return textureSampleLevel(image_in_a, smp, uv, 0.0);
+}
+
+fn image_b(uv: vec2<f32>) -> vec4<f32> {
+    return textureSampleLevel(image_in_b, smp, uv, 0.0);
+}
+
+// Rec. 709 brightness of a colour.
+fn luma(c: vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
