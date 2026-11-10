@@ -2,6 +2,16 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — Docs: README as a project page
+- README rewritten for people who find the project on GitHub. It covers:
+  - what the app does, with a picture of nine scenes;
+  - installing on Windows and macOS step by step;
+  - how to check the code yourself (no network, what it touches, tests, cargo audit);
+  - a map of the workspace, the roadmap, and notes for developers.
+- Licence files added (MIT or Apache 2.0, as `Cargo.toml` already said).
+- The roadmap now covers the latest playtest notes: navigation fixes in the UI pass,
+  graph templates, a starter picture pack, datamosh, and stems and sampling for later.
+
 ## 2026-11-10 — v2 M5 part 1: blend modes, masks, Layer Mixer
 - **21 blend modes**, the exact W3C / Photoshop maths (Normal, Add, Screen, Multiply,
   Overlay, Difference, Lighten, Darken, Subtract, Exclusion, Colour Dodge / Burn,
