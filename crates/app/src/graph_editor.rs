@@ -43,6 +43,9 @@ const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 18.0;
 const PORT_R: f32 = 5.0;
 const THUMB_H: f32 = (NODE_W - 12.0) * 9.0 / 16.0;
+/// Node size range and default (Ctrl+scroll).
+pub const NODE_SCALE: std::ops::RangeInclusive<f32> = 0.8..=1.6;
+pub const DEFAULT_NODE_SCALE: f32 = 1.15;
 /// Snap grid (graph units).
 pub const GRID: f32 = 16.0;
 const FRAME_TITLE_H: f32 = 24.0;
@@ -134,9 +137,10 @@ struct Layout {
     thumb: Option<Rect>,
 }
 
-fn layout(g: &Graph, n: &Node, thumbs: bool) -> Layout {
+fn layout(g: &Graph, n: &Node, thumbs: bool, k: f32) -> Layout {
+    let (nw, hh, rh, th) = (NODE_W * k, HEADER_H * k, ROW_H * k, THUMB_H * k);
     let min = pos2(n.pos[0], n.pos[1]);
-    let row_y = |i: usize| min.y + HEADER_H + ROW_H * (i as f32 + 0.5) + 2.0;
+    let row_y = |i: usize| min.y + hh + rh * (i as f32 + 0.5) + 2.0;
     let ports = |list: &[graph::PortDef], x: f32| -> Vec<(String, String, PortType, Pos2)> {
         list.iter()
             .enumerate()
@@ -151,7 +155,7 @@ fn layout(g: &Graph, n: &Node, thumbs: bool) -> Layout {
             .collect()
     };
     let inputs = ports(&n.inputs, min.x);
-    let outputs = ports(&n.outputs, min.x + NODE_W);
+    let outputs = ports(&n.outputs, min.x + nw);
     let first = inputs.len().max(outputs.len());
     let mods: Vec<_> = n
         .params
@@ -167,12 +171,12 @@ fn layout(g: &Graph, n: &Node, thumbs: bool) -> Layout {
         })
         .collect();
     let rows = (first + mods.len()).max(1);
-    let body = HEADER_H + ROW_H * rows as f32 + 8.0;
-    let thumb = (thumbs && n.makes_image())
-        .then(|| Rect::from_min_size(min + vec2(6.0, body), vec2(NODE_W - 12.0, THUMB_H)));
+    let body = hh + rh * rows as f32 + 8.0;
+    let thumb = (thumbs && !n.hide_thumb && n.makes_image())
+        .then(|| Rect::from_min_size(min + vec2(6.0, body), vec2(nw - 12.0, th)));
     let h = body + thumb.map_or(0.0, |t| t.height() + 6.0);
     Layout {
-        rect: Rect::from_min_size(min, vec2(NODE_W, h)),
+        rect: Rect::from_min_size(min, vec2(nw, h)),
         inputs,
         outputs,
         mods,
@@ -195,14 +199,21 @@ struct GroupBox {
     thumb: Option<(NodeId, Rect)>,
 }
 
-fn group_box(g: &Graph, grp: &Group, members: Vec<NodeId>, thumbs: bool) -> Option<GroupBox> {
+fn group_box(
+    g: &Graph,
+    grp: &Group,
+    members: Vec<NodeId>,
+    thumbs: bool,
+    k: f32,
+) -> Option<GroupBox> {
+    let (nw, hh, rh, th) = (NODE_W * k, HEADER_H * k, ROW_H * k, THUMB_H * k);
     let min = members
         .iter()
         .filter_map(|id| g.node(*id))
         .map(|n| pos2(n.pos[0], n.pos[1]))
         .reduce(|a, b| pos2(a.x.min(b.x), a.y.min(b.y)))?;
     let inside = |n: NodeId| members.contains(&n);
-    let row_y = |i: usize| min.y + HEADER_H + ROW_H * (i as f32 + 0.5) + 2.0;
+    let row_y = |i: usize| min.y + hh + rh * (i as f32 + 0.5) + 2.0;
     let mut ins: Vec<(Endpoint, String, PortType)> = Vec::new();
     let mut outs: Vec<(OutputRef, String, PortType)> = Vec::new();
     for l in g.links() {
@@ -248,11 +259,11 @@ fn group_box(g: &Graph, grp: &Group, members: Vec<NodeId>, thumbs: bool) -> Opti
     let outputs: Vec<_> = outs
         .into_iter()
         .enumerate()
-        .map(|(i, (o, l, t))| (o, l, t, pos2(min.x + NODE_W, row_y(i))))
+        .map(|(i, (o, l, t))| (o, l, t, pos2(min.x + nw, row_y(i))))
         .collect();
     let first = inputs.len().max(outputs.len());
-    let macro_h = ROW_H + 6.0;
-    let top = min.y + HEADER_H + ROW_H * first as f32 + 6.0;
+    let macro_h = rh + 6.0;
+    let top = min.y + hh + rh * first as f32 + 6.0;
     let macros: Vec<_> = grp
         .published
         .iter()
@@ -263,8 +274,8 @@ fn group_box(g: &Graph, grp: &Group, members: Vec<NodeId>, thumbs: bool) -> Opti
                 i,
                 pp.label.clone(),
                 Rect::from_min_max(
-                    pos2(min.x + 10.0, y + ROW_H - 2.0),
-                    pos2(min.x + NODE_W - 10.0, y + ROW_H + 2.0),
+                    pos2(min.x + 10.0, y + rh - 2.0),
+                    pos2(min.x + nw - 10.0, y + rh + 2.0),
                 ),
             )
         })
@@ -277,14 +288,14 @@ fn group_box(g: &Graph, grp: &Group, members: Vec<NodeId>, thumbs: bool) -> Opti
     let thumb = thumb_node.filter(|_| thumbs).map(|n| {
         (
             n,
-            Rect::from_min_size(min + vec2(6.0, body), vec2(NODE_W - 12.0, THUMB_H)),
+            Rect::from_min_size(min + vec2(6.0, body), vec2(nw - 12.0, th)),
         )
     });
     let h = body + thumb.map_or(0.0, |t| t.1.height() + 6.0);
     Some(GroupBox {
         id: grp.id,
         label: grp.label.clone(),
-        rect: Rect::from_min_size(min, vec2(NODE_W, h.max(HEADER_H + ROW_H + 8.0))),
+        rect: Rect::from_min_size(min, vec2(nw, h.max(hh + rh + 8.0))),
         members,
         inputs,
         outputs,
@@ -435,6 +446,8 @@ pub struct Editor {
     pub show_help: bool,
     /// Show each node's GPU time.
     pub show_cost: bool,
+    /// Node and text size (Ctrl+scroll), independent of the view zoom.
+    pub node_scale: f32,
 }
 
 impl Default for Editor {
@@ -457,6 +470,7 @@ impl Default for Editor {
             thumbnails: true,
             show_help: false,
             show_cost: true,
+            node_scale: DEFAULT_NODE_SCALE,
         }
     }
 }
@@ -563,7 +577,20 @@ impl Editor {
 
         // Zoom around the pointer.
         if resp.hovered() && self.search.is_none() {
-            let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            let (scroll, pinch, ctrl) =
+                ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta(), i.modifiers.command));
+            // Ctrl+scroll: bigger / smaller nodes and text (the view stays).
+            if ctrl && (pinch - 1.0).abs() > 1e-4 {
+                let before = self.node_scale;
+                self.node_scale = (before * pinch).clamp(*NODE_SCALE.start(), *NODE_SCALE.end());
+                if (self.node_scale - before).abs() > 1e-4 {
+                    self.say(
+                        ui,
+                        format!("Node size {:.0}% (Ctrl+scroll)", self.node_scale * 100.0),
+                    );
+                }
+            }
+            let pinch = if ctrl { 1.0 } else { pinch };
             let f = (scroll * 0.0015).exp() * pinch;
             if (f - 1.0).abs() > 1e-4
                 && let Some(p) = resp.hover_pos()
@@ -609,7 +636,7 @@ impl Editor {
             for m in &members {
                 hidden.insert(*m, grp.id);
             }
-            if let Some(b) = group_box(c.graph, grp, members, thumbs_on) {
+            if let Some(b) = group_box(c.graph, grp, members, thumbs_on, self.node_scale) {
                 boxes.push(b);
             }
         }
@@ -618,7 +645,7 @@ impl Editor {
             .nodes()
             .iter()
             .filter(|n| !hidden.contains_key(&n.id))
-            .map(|n| (n.id, layout(c.graph, n, thumbs_on)))
+            .map(|n| (n.id, layout(c.graph, n, thumbs_on, self.node_scale)))
             .collect();
         // Open groups: backdrops, deepest first so parents wrap children.
         let mut open: Vec<&Group> = c
@@ -689,7 +716,7 @@ impl Editor {
                 if !b.rect.contains(gp) {
                     continue;
                 }
-                if toggle_rect(b.rect, HEADER_H).contains(gp) {
+                if toggle_rect(b.rect, HEADER_H * s.node_scale).contains(gp) {
                     return Hit::GroupToggle(b.id);
                 }
                 for (i, _, bar) in &b.macros {
@@ -1061,6 +1088,14 @@ impl Editor {
         let selected_count = self.selected.len();
         let menu_target = self.menu_target.clone();
         let in_group = self.group_to_ungroup(c.graph);
+        // Picture nodes in the selection: are their pictures all hidden?
+        let pics: Vec<&Node> = self
+            .selected
+            .iter()
+            .filter_map(|id| c.graph.node(*id))
+            .filter(|n| n.makes_image())
+            .collect();
+        let thumbs_hidden = (!pics.is_empty()).then(|| pics.iter().all(|n| n.hide_thumb));
         resp.context_menu(|ui| {
             action = match &menu_target {
                 Hit::None => add_menu(ui, c.catalogue, selected_count),
@@ -1068,7 +1103,7 @@ impl Editor {
                 Hit::Group(id) | Hit::GroupToggle(id) | Hit::Macro(id, _) => {
                     c.graph.group(*id).and_then(|g| group_menu(ui, g))
                 }
-                _ => node_menu(ui, selected_count, in_group.is_some()),
+                _ => node_menu(ui, selected_count, in_group.is_some(), thumbs_hidden),
             };
         });
 
@@ -1430,7 +1465,7 @@ impl Editor {
                 }
             }
         };
-        let wire_w = (2.0 * z).clamp(1.0, 3.0);
+        let wire_w = (2.4 * z * self.node_scale).clamp(1.2, 4.0);
         for l in c.graph.links() {
             if let (Some(a), Some(b)) = (hidden.get(&l.from.node), hidden.get(&l.to.node()))
                 && a == b
@@ -1588,7 +1623,7 @@ impl Editor {
         b: &GroupBox,
         to_screen: &dyn Fn(&Self, Pos2) -> Pos2,
     ) {
-        let z = self.zoom;
+        let z = self.zoom * self.node_scale;
         let r = Rect::from_min_max(to_screen(self, b.rect.min), to_screen(self, b.rect.max));
         if !painter.clip_rect().intersects(r.expand(20.0)) {
             return;
@@ -1791,7 +1826,8 @@ impl Editor {
         to_screen: &dyn Fn(&Self, Pos2) -> Pos2,
         now: f64,
     ) {
-        let z = self.zoom;
+        // Sizes follow zoom and node size; positions come from the layout.
+        let z = self.zoom * self.node_scale;
         let r = Rect::from_min_max(to_screen(self, l.rect.min), to_screen(self, l.rect.max));
         if !painter.clip_rect().intersects(r.expand(20.0)) {
             return; // off screen
@@ -2620,6 +2656,16 @@ impl Editor {
                 let _ = c.history.exec(c.graph, Command::RemoveGroup(id));
                 self.focus_group = None;
             }
+            MenuAction::ToggleThumb(hide) => {
+                let cmds: Vec<Command> = sel
+                    .iter()
+                    .filter(|id| c.graph.node(**id).is_some_and(|n| n.makes_image()))
+                    .map(|id| Command::SetThumb { node: *id, hide })
+                    .collect();
+                if !cmds.is_empty() {
+                    let _ = c.history.exec(c.graph, Command::Batch(cmds));
+                }
+            }
             MenuAction::UngroupSelected => {
                 if let Some(id) = self.group_to_ungroup(c.graph) {
                     self.run_action(ui, c, MenuAction::Ungroup(id));
@@ -2709,7 +2755,7 @@ impl Editor {
                     .selected
                     .iter()
                     .filter_map(|id| c.graph.node(*id))
-                    .map(|n| layout(c.graph, n, self.thumbnails).rect)
+                    .map(|n| layout(c.graph, n, self.thumbnails, self.node_scale).rect)
                     .reduce(|a, b| a.union(b));
                 let r = match bounds {
                     Some(b) => Rect::from_min_max(
@@ -2756,7 +2802,13 @@ impl Editor {
                         .graph
                         .nodes()
                         .iter()
-                        .filter(|n| fr.contains(layout(c.graph, n, self.thumbnails).rect.center()))
+                        .filter(|n| {
+                            fr.contains(
+                                layout(c.graph, n, self.thumbnails, self.node_scale)
+                                    .rect
+                                    .center(),
+                            )
+                        })
                         .map(|n| n.id)
                         .collect();
                 }
@@ -2883,7 +2935,7 @@ impl Editor {
         let Some(b) = g
             .nodes()
             .iter()
-            .map(|n| layout(g, n, self.thumbnails).rect)
+            .map(|n| layout(g, n, self.thumbnails, self.node_scale).rect)
             .chain(g.frames().iter().map(frame_rect))
             .reduce(|a, b| a.union(b))
         else {
@@ -2933,6 +2985,7 @@ enum MenuAction {
     RenameFrame(u32),
     SelectInFrame(u32),
     RemoveFrame(u32),
+    ToggleThumb(bool),
     Group,
     Ungroup(GroupId),
     UngroupSelected,
@@ -3022,7 +3075,12 @@ fn swatches(ui: &mut egui::Ui, none: bool) -> Option<Option<[u8; 3]>> {
     pick
 }
 
-fn node_menu(ui: &mut egui::Ui, count: usize, in_group: bool) -> Option<MenuAction> {
+fn node_menu(
+    ui: &mut egui::Ui,
+    count: usize,
+    in_group: bool,
+    thumbs_hidden: Option<bool>,
+) -> Option<MenuAction> {
     let mut pick = None;
     let s = if count > 1 { "s" } else { "" };
     ui.label(egui::RichText::new("Colour").small().color(TEXT_DIM));
@@ -3035,6 +3093,22 @@ fn node_menu(ui: &mut egui::Ui, count: usize, in_group: bool) -> Option<MenuActi
     }
     if ui.button(format!("Duplicate{s}")).clicked() {
         pick = Some(MenuAction::Duplicate);
+    }
+    if let Some(hidden) = thumbs_hidden {
+        let text = if hidden {
+            "Show live picture"
+        } else {
+            "Hide live picture"
+        };
+        if ui
+            .button(text)
+            .on_hover_text(
+                "The small preview inside the node (the toolbar's Thumbnails turns all off)",
+            )
+            .clicked()
+        {
+            pick = Some(MenuAction::ToggleThumb(!hidden));
+        }
     }
     if ui.button("Copy   Ctrl+C").clicked() {
         pick = Some(MenuAction::Copy);
@@ -3162,6 +3236,7 @@ fn help_overlay(painter: &egui::Painter, rect: Rect) {
         ("Ctrl+A", "select all"),
         ("G", "snap to grid on / off"),
         ("Scroll, middle-drag", "zoom, pan (or Space/Alt + drag)"),
+        ("Ctrl+scroll", "bigger / smaller nodes and text"),
         ("Home", "fit everything in view"),
         ("Tab", "hide / show the graph"),
         ("?  or  Esc", "close this sheet"),

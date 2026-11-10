@@ -2,6 +2,14 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — Editor polish: node size, per-node pictures, Hold node
+- Ctrl+scroll makes nodes and their text bigger or smaller (80–160%, remembered);
+  plain scroll still zooms the view. Nodes start 15% bigger, wires a bit bolder.
+- Right-click a picture node → Hide / Show live picture (per node, saved with the
+  graph; the toolbar's Thumbnails still turns them all off).
+- New Hold node: Start trigger → 1 until the Stop trigger fires or a length runs out
+  (beats, bars or seconds), with fade in / out. "On the drop, bend until the next hat."
+
 ## 2026-11-10 — v2 M3 part 3: groups, macro knobs, GPU cost
 - Groups: select nodes, Ctrl+G. An open group has a lilac backdrop with a title (drag it
   to move everything, double-click to rename). ▾ folds it into one box that shows the

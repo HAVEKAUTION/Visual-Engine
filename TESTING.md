@@ -316,6 +316,18 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## Editor polish – node size, per-node pictures, Hold
+
+- [ ] Hold **Ctrl** and scroll over the graph: nodes and their text grow / shrink (a
+      message shows the size). Plain scroll still zooms. Restart: the size is kept.
+- [ ] Right-click a picture node → **Hide live picture**: just that node's preview goes.
+      Right-click again → **Show live picture**.
+- [ ] *On the drop, bend until the next hat:* add **Audio Trigger** (Drop) → **Hold**
+      Start, another **Audio Trigger** (Hat) → **Hold** Stop, then drop Hold's blue wire
+      on a Transform → Zoom (or any slider). It jumps on the drop and lets go on the
+      next hat. Set **Length** to 4 (beats) and unplug Stop: it holds for one bar.
+      Try Fade out 1 s for a softer release.
+
 ## v2 M3 part 3 – Groups, macro knobs, GPU cost
 
 Run: `cargo run --release -p app`. Tip: right-click empty graph space → **Add starter

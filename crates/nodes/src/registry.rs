@@ -28,6 +28,9 @@ pub const ENVELOPE: &str = "envelope";
 pub const COUNTER: &str = "counter";
 pub const SAMPLE_HOLD: &str = "sample_hold";
 pub const RANDOM: &str = "random";
+pub const HOLD: &str = "hold";
+/// Units for Hold's length.
+pub const HOLD_UNITS: &[&str] = &["beats", "bars", "seconds"];
 
 /// Events the Audio Trigger node can fire on: (key, label).
 pub const TRIGGER_EVENTS: &[(&str, &str)] = &[
@@ -221,6 +224,18 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
             value_out(),
             vec![num("steps", "Steps", 2.0, 64.0, 4.0)],
         ),
+        HOLD => spec(
+            "Hold",
+            vec![trig_in("start", "Start"), trig_in("stop", "Stop")],
+            value_out(),
+            vec![
+                num("length", "Length (0 = until Stop)", 0.0, 64.0, 0.0),
+                pick("unit", "Length in", HOLD_UNITS, 0),
+                num("fade_in", "Fade in (s)", 0.0, 4.0, 0.0),
+                num("fade_out", "Fade out (s)", 0.0, 8.0, 0.25),
+                toggle("toggle", "Start again = stop", false),
+            ],
+        ),
         SAMPLE_HOLD => spec(
             "Sample & Hold",
             vec![sig_in("in", "In"), trig_in("trigger", "Trigger")],
@@ -401,6 +416,11 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
             "Counts triggers and steps through values: change colour every bar, every 4 kicks...",
         ),
         (
+            HOLD,
+            Category::Signal,
+            "When Start fires, goes to 1 and stays there until Stop fires or the length runs              out. \"On the drop, bend until the next hi-hat.\"",
+        ),
+        (
             SAMPLE_HOLD,
             Category::Signal,
             "Grabs a signal on each trigger and holds it until the next.",
@@ -447,9 +467,8 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
 pub fn category_of(kind: &str, outputs_image: bool, has_image_inputs: bool) -> Category {
     match kind {
         AUDIO_TRIGGER | BEAT_TRIGGER | GATE => Category::Trigger,
-        AUDIO_SIGNAL | LFO | MATH | REMAP | SMOOTH | ENVELOPE | COUNTER | SAMPLE_HOLD | RANDOM => {
-            Category::Signal
-        }
+        AUDIO_SIGNAL | LFO | MATH | REMAP | SMOOTH | ENVELOPE | COUNTER | SAMPLE_HOLD | RANDOM
+        | HOLD => Category::Signal,
         PROGRAM_OUT => Category::Output,
         _ if outputs_image && !has_image_inputs => Category::Source,
         _ => Category::Effect,

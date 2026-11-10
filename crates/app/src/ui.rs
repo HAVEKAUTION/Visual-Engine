@@ -42,6 +42,7 @@ struct Prefs {
     thumbnails: bool,
     show_fps: bool,
     show_cost: bool,
+    node_scale: f32,
 }
 
 impl Default for Prefs {
@@ -58,6 +59,7 @@ impl Default for Prefs {
             thumbnails: true,
             show_fps: true,
             show_cost: true,
+            node_scale: crate::graph_editor::DEFAULT_NODE_SCALE,
         }
     }
 }
@@ -156,6 +158,10 @@ impl VisualEngineApp {
         app.scene.ws.editor.snap = prefs.snap;
         app.scene.ws.editor.thumbnails = prefs.thumbnails;
         app.scene.ws.editor.show_cost = prefs.show_cost;
+        app.scene.ws.editor.node_scale = prefs.node_scale.clamp(
+            *crate::graph_editor::NODE_SCALE.start(),
+            *crate::graph_editor::NODE_SCALE.end(),
+        );
         app.rescan_inputs();
         if let Some(path) = startup_song {
             app.load_song(path);
@@ -995,6 +1001,7 @@ impl eframe::App for VisualEngineApp {
             thumbnails: ws.editor.thumbnails,
             show_fps: self.show_fps,
             show_cost: ws.editor.show_cost,
+            node_scale: ws.editor.node_scale,
         };
         eframe::set_value(storage, PREFS_KEY, &prefs);
     }

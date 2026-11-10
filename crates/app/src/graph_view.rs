@@ -177,7 +177,7 @@ impl Workspace {
         self.graph
             .nodes()
             .iter()
-            .filter(|n| thumbnails || !n.makes_image())
+            .filter(|n| (thumbnails && !n.hide_thumb) || !n.makes_image())
             .map(|n| n.id)
             .collect()
     }

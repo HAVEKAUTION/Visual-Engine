@@ -58,6 +58,11 @@ pub enum Command {
         node: NodeId,
         colour: Option<[u8; 3]>,
     },
+    /// Show or hide a node's live picture in the editor.
+    SetThumb {
+        node: NodeId,
+        hide: bool,
+    },
     /// Add a frame (backdrop), or replace the one with the same id.
     PutFrame(Frame),
     RemoveFrame(u32),
@@ -204,6 +209,10 @@ impl Graph {
             Command::SetColour { node, colour } => {
                 let old = std::mem::replace(&mut self.node_mut(node)?.colour, colour);
                 Command::SetColour { node, colour: old }
+            }
+            Command::SetThumb { node, hide } => {
+                let old = std::mem::replace(&mut self.node_mut(node)?.hide_thumb, hide);
+                Command::SetThumb { node, hide: old }
             }
             Command::PutFrame(f) => {
                 let id = f.id;

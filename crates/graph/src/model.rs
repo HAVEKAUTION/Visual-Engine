@@ -61,6 +61,9 @@ pub struct Node {
     /// Colour tag chosen by the user (`None` = the type's own colour).
     #[serde(default)]
     pub colour: Option<[u8; 3]>,
+    /// Hide the live picture inside the node in the editor (view only).
+    #[serde(default)]
+    pub hide_thumb: bool,
 }
 
 impl Node {
@@ -513,6 +516,7 @@ impl Graph {
             bypass: false,
             resolution: Resolution::Inherit,
             colour: None,
+            hide_thumb: false,
         }
     }
 

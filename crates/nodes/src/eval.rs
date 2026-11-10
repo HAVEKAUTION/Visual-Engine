@@ -33,6 +33,7 @@ pub fn is_signal_kind(kind: &str) -> bool {
             | COUNTER
             | SAMPLE_HOLD
             | RANDOM
+            | HOLD
     )
 }
 
@@ -45,6 +46,8 @@ struct SigState {
     rising: bool,
     count: u32,
     since: f32,
+    /// Hold: beat position when it started.
+    mark: f64,
 }
 
 /// What a signal node can read this frame.
@@ -203,6 +206,46 @@ fn signal_node(kind: &str, st: &mut SigState, i: &SigIn) -> f32 {
             }
             let n = (i.num)("steps", 4.0).round().max(2.0) as u32;
             (st.count % n) as f32 / (n - 1) as f32
+        }
+        HOLD => {
+            let start = fired((i.input)("start"));
+            let stop = fired((i.input)("stop"));
+            let on = &mut st.rising;
+            if start && *on && (i.flag)("toggle", false) {
+                *on = false;
+            } else if start {
+                *on = true;
+                st.since = 0.0;
+                st.mark = i.beats;
+            } else if stop {
+                *on = false;
+            }
+            if *on {
+                st.since += dt;
+                let length = (i.num)("length", 0.0);
+                if length > 0.0 {
+                    let gone = match HOLD_UNITS.get((i.choice)("unit") as usize) {
+                        Some(&"seconds") => st.since as f64,
+                        Some(&"bars") => (i.beats - st.mark) / 4.0,
+                        _ => i.beats - st.mark,
+                    };
+                    if gone >= length as f64 {
+                        *on = false;
+                    }
+                }
+            }
+            let (target, time) = if st.rising {
+                (1.0, (i.num)("fade_in", 0.0))
+            } else {
+                (0.0, (i.num)("fade_out", 0.25))
+            };
+            if time <= 0.0 {
+                st.level = target;
+            } else {
+                let step = dt / time;
+                st.level += (target - st.level).clamp(-step, step);
+            }
+            st.level
         }
         SAMPLE_HOLD => {
             if first || fired((i.input)("trigger")) {
@@ -811,5 +854,35 @@ mod signal_tests {
             }
         }
         assert_eq!(fires, vec![5, 15, 25]);
+    }
+
+    #[test]
+    fn hold_stays_on_from_start_until_stop_or_length() {
+        let fire_at = |at: usize| move |f: usize| (f == at).then_some(1.0);
+        // Start at frame 2, Stop at frame 6, instant fades.
+        let out = run(HOLD, &[("fade_out", 0.0)], 10, 0.1, &|f, p| match p {
+            "start" => fire_at(2)(f),
+            "stop" => fire_at(6)(f),
+            _ => None,
+        });
+        assert_eq!(out, vec![0., 0., 1., 1., 1., 1., 0., 0., 0., 0.]);
+        // No Stop, length 1 beat (a frame = 0.25 beats here): 4 frames on.
+        let out = run(
+            HOLD,
+            &[("length", 1.0), ("fade_out", 0.0)],
+            10,
+            0.1,
+            &|f, p| (p == "start").then(|| fire_at(1)(f)).flatten(),
+        );
+        assert_eq!(out, vec![0., 1., 1., 1., 1., 0., 0., 0., 0., 0.]);
+        // Fade out over 0.4 s at 0.1 s frames: 1 → 0.75 → 0.5 → 0.25 → 0.
+        let out = run(HOLD, &[("fade_out", 0.4)], 8, 0.1, &|f, p| match p {
+            "start" => fire_at(0)(f),
+            "stop" => fire_at(2)(f),
+            _ => None,
+        });
+        for (got, want) in out.iter().zip([1.0, 1.0, 0.75, 0.5, 0.25, 0.0, 0.0, 0.0]) {
+            assert!((got - want).abs() < 1e-5, "{out:?}");
+        }
     }
 }
