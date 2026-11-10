@@ -10,7 +10,12 @@ use signals::SignalFrame;
 
 const SIZE: (u32, u32) = (320, 180);
 
+/// Starting several GPU devices at the same moment can hang the driver (seen
+/// on Windows when the tests run in parallel), so tests start them in turn.
+static GPU_START: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn gpu() -> Option<(wgpu::Device, wgpu::Queue)> {
+    let _one_at_a_time = GPU_START.lock().unwrap_or_else(|e| e.into_inner());
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -175,6 +180,7 @@ fn nothing_plugged_in_shows_black() {
 /// With GPU timestamps, every drawn node gets a time; without, there are none.
 #[test]
 fn gpu_cost_per_node_is_measured_when_supported() {
+    let _one_at_a_time = GPU_START.lock().unwrap_or_else(|e| e.into_inner());
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let Ok(adapter) =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))

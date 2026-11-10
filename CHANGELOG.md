@@ -2,6 +2,13 @@
 
 One short entry per task, newest first.
 
+## 2026-11-11 — New scene: Fractal Bloom
+- **Fractal Bloom**: the "round bubbling sharp" fractal from the test picture, now a
+  live scene. Round bulbs with colour slices inside and spiky edges that flash on
+  the kick and sparkle on the hi-hats. It dives in and out with the loudness and the
+  bulbs bubble with the bass. Shape → *Flowers* gives fractal blossoms instead.
+- Peak time now uses it in place of the kaleidoscope.
+
 ## 2026-11-10 — v2 M6 part 1b: templates that weave your media together
 - **Your media, woven together** (new first template): the app looks at your
   pictures and sorts them into **backdrops** (busy photos that fill the screen) and

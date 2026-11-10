@@ -37,6 +37,10 @@ pub const BUILTIN: &[Builtin] = &[
         source: include_str!("../shaders/midnight_window.wgsl"),
     },
     Builtin {
+        file_name: "fractal_bloom.wgsl",
+        source: include_str!("../shaders/fractal_bloom.wgsl"),
+    },
+    Builtin {
         file_name: "velvet_mirrorball.wgsl",
         source: include_str!("../shaders/velvet_mirrorball.wgsl"),
     },

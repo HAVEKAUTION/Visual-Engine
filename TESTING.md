@@ -327,6 +327,18 @@ Best done on a PC (or Windows user account) that has never built the app.
       Getting started steps in the Inspector.
 - [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
+## Fractal Bloom scene
+
+Play music for these.
+- [ ] Right-click the graph → add the scene **Fractal Bloom**. Round bulbs with
+      coloured slices inside, spiky glittering edges, on black.
+- [ ] Over half a minute or so it slowly dives in and back out; louder music dives
+      faster. The bulbs gently wobble with the bass.
+- [ ] The spiky edges flash on each kick; bright specks sparkle on the hi-hats.
+- [ ] Inspector → Shape → **Flowers (Julia)**: fractal blossoms that keep changing.
+- [ ] Try each **Dive into** point. If the frame rate drops, set Smooth edges → Off.
+- [ ] **Peak time** template now includes the fractal.
+
 ## v2 M6 part 1b – Woven templates, backdrops and subjects
 
 Play music (Sources → Open song… or Computer audio) for all of these.

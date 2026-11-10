@@ -50,7 +50,7 @@ pub const ALL: &[Template] = &[
     Template {
         id: "peak_time",
         name: "Peak time",
-        note: "Tunnel, furnace, kaleidoscope and jungle, in a random order with a different \
+        note: "Tunnel, furnace, fractal and jungle, in a random order with a different \
                transition each time. They change on phrases, section changes and drops, not \
                on a fixed clock, and the drop blooms with light.",
         uses: "",
@@ -508,9 +508,9 @@ fn woven(b: &mut Builder, media: &DemoMedia) -> Result<String, String> {
 fn peak_time(b: &mut Builder) -> Result<String, String> {
     let tunnel = b.shader("warehouse_tunnel.wgsl", "", 0.0, 1.0)?;
     let furnace = b.shader("iron_furnace.wgsl", "", 0.0, 2.0)?;
-    let bloom = b.shader("kaleido_bloom.wgsl", "", 0.0, 3.0)?;
+    let bloom = b.shader("fractal_bloom.wgsl", "", 0.0, 3.0)?;
     let canopy = b.shader("canopy_breaks.wgsl", "", 0.0, 4.0)?;
-    b.num(bloom, &[("kick_punch", 0.8), ("warp", 1.3)])?;
+    b.num(bloom, &[("edge_flash", 1.2), ("dive_speed", 0.08)])?;
     b.num(tunnel, &[("colour_cycle", 0.4), ("accent_amt", 0.3)])?;
     let when = Changes {
         every: 64.0,

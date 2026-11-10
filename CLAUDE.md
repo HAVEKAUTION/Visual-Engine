@@ -178,9 +178,10 @@ layouts, Sources panel, themes in `app/src/theme.rs`: UI colours come from
 (templates in `nodes/src/templates.rs`, Switch node, Phosphor icons in
 `app/src/icons.rs`: never use emoji in the UI). M6 part 1b done (woven template,
 `media::picture_role` backdrop/subject sorting, Displace, Liquid, Auto Cut-out;
-the user dislikes the CRT/VHS scene and predictable loops: keep it out). Next up: **M6 part 2**: the user
-reviews the signature Looks pitch, then Looks + Look DNA. Ask the user which scene
-is the "round bubbling sharp" one they liked before making new scenes. No Twitch.
+the user dislikes the CRT/VHS scene and predictable loops: keep it out).
+The "round bubbling sharp" thing the user liked was the Mandelbrot test picture:
+now the Fractal Bloom scene (`fractal_bloom.wgsl`). Next up: **M6 part 2**: the user
+reviews the signature Looks pitch, then Looks + Look DNA. No Twitch.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.
