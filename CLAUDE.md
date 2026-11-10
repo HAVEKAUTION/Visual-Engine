@@ -42,6 +42,9 @@ and 4K video export.
   it costs nothing, since a web port may happen one day, but that isn't a goal either.
   The goal is a complete, polished program that runs well and efficiently on the
   user's machine.
+- **Install for testers:** `setup.bat` → `setup.ps1` installs the prerequisites via
+  winget and builds; `run.bat` starts the app. If a new prerequisite is ever added
+  (a tool, a DLL), add it to `setup.ps1` and the README table in the same commit.
 - **Everything findable (user, 2026-11-10):** every feature must be reachable from the
   Inspector or by right-clicking (a node, a plug, the graph). Keyboard shortcuts are
   extras, never the only way. New nodes get a "How to use" note (`app/src/tips.rs`).

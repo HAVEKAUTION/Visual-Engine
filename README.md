@@ -9,8 +9,9 @@ Made for VJs, DJs, streamers and musicians who want visuals that move *with* a t
 not just alongside it.
 
 > **Status: early, in active development.** It runs and is fun to play with, but it
-> isn't a finished release yet. There are no ready-made downloads: you build it from
-> the source code (steps below). Settings and saved files may change between versions.
+> isn't a finished release yet. There are no ready-made downloads: a setup script
+> builds it from the source code for you ([3 steps](#install-3-steps)). Settings and
+> saved files may change between versions.
 
 ![Nine of the built-in scenes](docs/images/scenes.jpg)
 
@@ -44,40 +45,110 @@ not just alongside it.
 
 Coming next is listed in the [Roadmap](#roadmap).
 
-## Install (build from source)
+## Contents
 
-It runs on **Windows 10 and 11** (macOS isn't supported). You need two things:
-**Rust** (the programming language the app is written in) and, for video files,
-**ffmpeg**. Building takes 5–10 minutes the first time and
-seconds after that.
+- [Install (3 steps)](#install-3-steps)
+- [Your first 5 minutes](#your-first-5-minutes)
+- [Updating](#updating)
+- [If something goes wrong](#if-something-goes-wrong)
+- [Check the code yourself](#check-the-code-yourself)
+- [Finding your way around](#finding-your-way-around)
+- [Roadmap](#roadmap)
+- [For developers](#for-developers)
 
-### Windows 10 / 11
+## Install (3 steps)
 
-1. Install the Microsoft C++ build tools. Download "Build Tools for Visual Studio"
-   from <https://visualstudio.microsoft.com/visual-cpp-build-tools/>, run it, tick
-   **Desktop development with C++**, and press Install.
-2. Install Rust: download and run `rustup-init.exe` from <https://rustup.rs>. Accept
-   the defaults.
-3. Optional, for video files: open **Terminal** and run
-   `winget install Gyan.FFmpeg`
-4. Download the code. On this page, click the green **Code** button, then
-   **Download ZIP**, and unzip it. Or, if you have git:
-   `git clone https://github.com/HAVEKAUTION/Visual-Engine.git`
-5. Open **Terminal** in that folder (in File Explorer, right-click the folder and choose
-   *Open in Terminal*), then run:
+Runs on **Windows 10 and 11** (64-bit). You need about **10 GB free** and an
+internet connection for the first setup. The first setup takes **15–30 minutes**,
+mostly downloads and the first build. After that the app starts in seconds.
 
-   ```
-   cargo run --release
-   ```
+**1. Download.** On this page click the green **Code** button → **Download ZIP**.
+Right-click the ZIP → **Properties** → tick **Unblock** (bottom right) → **OK**.
+Then right-click it → **Extract All…** → **Extract**.
+
+**2. Double-click `setup.bat`** in the extracted folder. It installs what the app
+needs, skipping anything you already have, then builds the app:
+
+| What | Why | Size |
+|---|---|---|
+| Microsoft C++ Build Tools | the compiler Rust uses on Windows | 2–6 GB |
+| Rust | the language the app is written in | about 1 GB |
+| ffmpeg | plays video files (optional) | about 200 MB |
+
+All three come from **winget**, Windows' own package manager, from their official
+publishers. You can read [`setup.ps1`](setup.ps1) first: it is short and commented.
+
+- If Windows says **"Windows protected your PC"**, click **More info** → **Run anyway**.
+- When Windows asks **"Do you want to allow this app to make changes"** (for the
+  Build Tools), click **Yes**. A Visual Studio Installer window shows its progress.
+- Wait for the green **"All set"** line, then press any key to close the window.
+
+**3. Double-click `run.bat`** to start Visual Engine. Use it every time you want to
+start the app (make a desktop shortcut to it if you like).
+
+<details>
+<summary>Prefer to install by hand?</summary>
+
+1. Install "Build Tools for Visual Studio" from
+   <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and tick
+   **Desktop development with C++**.
+2. Install Rust with `rustup-init.exe` from <https://rustup.rs> (accept the defaults).
+3. Optional, for video files, in **Terminal**: `winget install Gyan.FFmpeg`
+4. Get the code (ZIP as above, or `git clone https://github.com/HAVEKAUTION/Visual-Engine.git`).
+5. Open **Terminal** in that folder (right-click the folder → *Open in Terminal*) and run
+   `cargo run --release`
+
+</details>
+
+## Your first 5 minutes
+
+1. **Give it sound.** Click the **Sources** tab (top left). Either click
+   **Open song…** and pick an MP3 / WAV / FLAC / OGG, or click **Computer audio**
+   and play music in Spotify, YouTube or a DJ app. The meters along the bottom start
+   moving, and the BPM appears after a few seconds.
+2. **See the demo.** Right-click the empty grey area of the **Node Graph** (bottom)
+   → **Add compositing demo**. The viewer fills with layered, beat-driven visuals.
+3. **Use your own pictures.** Click the **Media** tab → **Import…** and pick a few
+   pictures and videos. Add the demo again: it uses up to 2 videos and 3 pictures.
+4. **Change things.** Click any node in the graph. Its settings appear in the
+   **Inspector** (right), with a short "How to use" note. Right-click a node to see
+   everything you can do with it.
+5. **Arrange the screen.** Drag any panel's tab to move it. **Layout** (top left)
+   has ready-made arrangements, and **Panels** brings back anything you hid.
+
+Want to help test? Each feature has a tick-list in [`TESTING.md`](TESTING.md).
+Problems and ideas are welcome as
+[issues](https://github.com/HAVEKAUTION/Visual-Engine/issues).
 
 ### Handy extras
 
-- Open a song straight away: `cargo run --release -- "C:/Music/song.mp3"`
+- Open a song straight away: drag it onto `run.bat`, or drop it onto the app window.
 - Analyse songs without opening the window. This writes `<song>.analysis.csv` next
-  to each one:
-  `cargo run --release -- --analyse "a.mp3" "b.flac"`
+  to each one: `cargo run --release -- --analyse "a.mp3" "b.flac"`
 - Keep a test session's settings and files separate from your real ones: set the
   environment variable `VISUAL_ENGINE_DATA` to a folder before starting.
+
+## Updating
+
+Download the ZIP again and extract it over the old folder (or `git pull` if you used
+git), then double-click `run.bat`. It rebuilds the changed parts by itself, which
+takes a minute or two. Your settings, media list and autosaved graph are kept: they
+live in your user folder, not in the app's folder.
+
+## If something goes wrong
+
+| What you see | What to do |
+|---|---|
+| "winget is missing" | Open the **Microsoft Store**, search **App Installer**, install or update it, run `setup.bat` again. |
+| "Windows protected your PC" | **More info** → **Run anyway**. Or unblock the ZIP before extracting (step 1). |
+| Setup stopped at the C++ Build Tools | Install them by hand (see *Prefer to install by hand?*), then run `setup.bat` again. |
+| "Rust isn't installed yet" from `run.bat` | Run `setup.bat` first. If you just ran it, restart the PC once. |
+| `link.exe not found` while building | The C++ Build Tools are missing: run `setup.bat` again. |
+| "Video needs ffmpeg" in the app | In **Terminal**: `winget install Gyan.FFmpeg`, then restart the app. |
+| No sound reaction | **Sources** tab: pick an input and press **Start input**, or **Computer audio**. Check Windows' sound settings use the device you expect. |
+| Camera doesn't show | **Sources** tab → the refresh button next to **Cameras**. Close other apps using the camera (Teams, Zoom, OBS). Check Windows Settings → Privacy → Camera allows desktop apps. |
+| A panel disappeared | **Panels** menu: tick it. Or **Layout** → **Reset**. |
+| Anything else | Open an [issue](https://github.com/HAVEKAUTION/Visual-Engine/issues) and paste the messages from the black window. |
 
 ## Check the code yourself
 
@@ -98,7 +169,10 @@ it does.
   - `.analysis.csv` files, only if you run `--analyse`.
 
   It runs `ffmpeg` as a separate program to read video files.
-- **Run the tests.** About 160 automated checks cover the audio maths, the graph, the
+- **The setup script** ([`setup.ps1`](setup.ps1)) only installs the three tools
+  listed above through winget, then runs `cargo build --release`. `run.bat` only
+  runs `cargo run --release`.
+- **Run the tests.** About 165 automated checks cover the audio maths, the graph, the
   blend modes (compared pixel by pixel on your graphics card) and more:
 
   ```

@@ -2,6 +2,18 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — Easy install, README walkthrough, QA pass
+- **`setup.bat`** (double-click): installs the C++ Build Tools, Rust and ffmpeg
+  through winget (skipping anything already there), then builds the app. The
+  commented script is `setup.ps1`. **`run.bat`** starts the app and rebuilds after
+  an update.
+- **README** rewritten for newcomers: contents, install in 3 steps, "your first 5
+  minutes", updating, and a "if something goes wrong" table.
+- **QA:** a fresh copy of the repository was set up with `setup.bat` and launched
+  with empty settings (first-run screen checked). fmt, clippy and all tests pass.
+- **Fix (efficiency):** node previews no longer render on the GPU while the Node
+  Graph tab is hidden behind another tab.
+
 ## 2026-11-10 — v2 M3b part 1: dockable panels, Sources panel, layouts
 - **Dockable workspace.** Every panel (Viewer, Node Graph, Inspector, Sources, Media,
   Looks, Analysis, Meters) is a tab. Drag a tab to move it, drop it on the edge of

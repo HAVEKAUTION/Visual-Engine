@@ -1,6 +1,6 @@
 # Testing checklist
 
-Run the app with:
+Run the app by double-clicking `run.bat` (first time: `setup.bat`), or with:
 
 ```
 cargo run --release
@@ -315,6 +315,17 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   app (or for Terminal, if started from Terminal). Click Allow. If you said no: System
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
+
+## Install from scratch (setup.bat / run.bat)
+
+Best done on a PC (or Windows user account) that has never built the app.
+- [ ] Download the ZIP from GitHub, Unblock it (Properties), Extract All.
+- [ ] Double-click `setup.bat`. Each step says OK or installs; the end says
+      **All set** in green.
+- [ ] Running `setup.bat` a second time skips all installs and finishes quickly.
+- [ ] Double-click `run.bat`: the app opens with the starter graph and the
+      Getting started steps in the Inspector.
+- [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
 ## v2 M3b part 1 – Dockable panels, Sources panel, layouts
 

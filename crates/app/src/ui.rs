@@ -95,6 +95,8 @@ pub struct VisualEngineApp {
     show_strip: bool,
     /// The graph panel is on screen this frame.
     graph_shown: bool,
+    /// Was the graph pane drawn this frame (not hidden or behind another tab)?
+    graph_drawn: bool,
     sync: crate::av_sync::AvSync,
 }
 
@@ -150,6 +152,7 @@ impl VisualEngineApp {
             layout: prefs.layout,
             show_strip: prefs.show_strip,
             graph_shown: true,
+            graph_drawn: true,
             sync: crate::av_sync::AvSync::new(prefs.av_offset_ms),
         };
         app.scene.ws.viewer = prefs.viewer;
@@ -1257,7 +1260,10 @@ impl eframe::App for VisualEngineApp {
                 .show(ui, |ui| self.signal_strip(ui));
         }
 
-        self.graph_shown = self.scene.graph_mode && self.shown(Pane::Graph);
+        // Node previews only render while the graph is really on screen (last
+        // frame's answer: the viewer may be drawn before the graph pane).
+        self.graph_shown = self.scene.graph_mode && self.graph_drawn;
+        self.graph_drawn = false;
         let mut tree = std::mem::replace(
             &mut self.dock,
             egui_tiles::Tree::empty(egui::Id::unique("swap")),
@@ -1308,6 +1314,7 @@ impl egui_tiles::Behavior<Pane> for Panes<'_> {
             Pane::Viewer => app.preview(ui, self.frame),
             Pane::Graph => {
                 if app.scene.graph_mode {
+                    app.graph_drawn = true;
                     egui::Frame::NONE
                         .fill(crate::graph_editor::CANVAS_BG)
                         .show(ui, |ui| {
