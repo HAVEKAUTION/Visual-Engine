@@ -7,11 +7,14 @@ publish.workspace = true
 
 [dependencies]
 graph.workspace = true
+media.workspace = true
 scenes.workspace = true
 render.workspace = true
 signals.workspace = true
 log.workspace = true
 
 [dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+media.workspace = true
 wgpu.workspace = true
 pollster.workspace = true

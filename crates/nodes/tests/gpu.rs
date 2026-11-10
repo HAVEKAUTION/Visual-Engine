@@ -236,3 +236,155 @@ fn gpu_cost_per_node_is_measured_when_supported() {
         }
     }
 }
+
+/// Render `graph` until `done(picture)` or a timeout (media loads in the
+/// background). Returns the last picture.
+fn render_until(
+    graph: &Graph,
+    out: NodeId,
+    mut done: impl FnMut(&[u8]) -> bool,
+) -> Option<(Vec<u8>, Evaluator)> {
+    let (device, queue) = gpu()?;
+    let lib = SceneLibrary::new(None);
+    let mut r = Renderer::new(&device, &queue);
+    let mut ev = Evaluator::new(1000);
+    let mut sig = SignalState::new();
+    let f = SignalFrame::default();
+    let start = std::time::Instant::now();
+    loop {
+        sig.update(&f, 1.0 / 60.0, [SIZE.0 as f32, SIZE.1 as f32]);
+        r.begin_frame(SIZE);
+        let shown = ev.run(
+            graph,
+            &lib,
+            &mut r,
+            FrameInput {
+                signals: &mut sig,
+                dt: 1.0 / 60.0,
+                controls: &[0.0; 8],
+                intensity: 1.0,
+                output_size: SIZE,
+                proxy: 1.0,
+            },
+            &[out],
+            &[],
+        );
+        r.present_from([shown, Show::Black], Master::default());
+        r.end_frame();
+        let (_, _, px) = r.read_display()?;
+        if done(&px) || start.elapsed().as_secs() > 15 {
+            return Some((px, ev));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+}
+
+fn set(g: &mut Graph, node: NodeId, param: &str, value: graph::ParamValue) {
+    g.apply(Command::SetParam {
+        node,
+        param: param.into(),
+        value,
+    })
+    .unwrap();
+}
+
+#[test]
+fn image_node_shows_its_file_and_missing_files_report_an_error() {
+    let dir = std::env::temp_dir().join(format!("ve-gpu-img-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("red.png");
+    image::RgbaImage::from_pixel(32, 18, image::Rgba([255, 0, 0, 255]))
+        .save(&path)
+        .unwrap();
+    let mut g = Graph::new();
+    let img = add(&mut g, registry::IMAGE);
+    let out = add(&mut g, PROGRAM_OUT);
+    wire(&mut g, img, out, "image");
+    set(
+        &mut g,
+        img,
+        registry::FILE_PARAM,
+        graph::ParamValue::Text(path.display().to_string()),
+    );
+    let red = |px: &[u8]| px[0] > 200 && px[1] < 40 && px[2] < 40;
+    let Some((px, _)) = render_until(&g, out, |px| red(&px[px.len() / 2..])) else {
+        return; // no GPU
+    };
+    let mid = &px[px.len() / 2..];
+    assert!(red(mid), "expected red, got {:?}", &mid[..4]);
+
+    set(
+        &mut g,
+        img,
+        registry::FILE_PARAM,
+        graph::ParamValue::Text(dir.join("gone.png").display().to_string()),
+    );
+    let (_, ev) = render_until(&g, out, |_| true).unwrap();
+    assert!(ev.errors.get(&img).is_some_and(|e| e.contains("not found")));
+}
+
+#[test]
+fn video_node_scrubs_to_the_asked_position() {
+    if !media::have_ffmpeg() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("ve-gpu-vid-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let clip = dir.join("ramp.mp4");
+    // Brightness rises over the clip: frame n is grey 12·n.
+    let ok = std::process::Command::new(media::ffmpeg_path())
+        .args([
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=black:s=64x36:r=10:d=2,geq=lum='12*N':cb=128:cr=128",
+            "-c:v",
+            "libx264",
+            "-qp",
+            "0",
+            "-pix_fmt",
+            "yuv444p",
+        ])
+        .arg(&clip)
+        .status()
+        .is_ok_and(|s| s.success());
+    assert!(ok);
+    let mut g = Graph::new();
+    let v = add(&mut g, registry::VIDEO);
+    let out = add(&mut g, PROGRAM_OUT);
+    wire(&mut g, v, out, "image");
+    set(
+        &mut g,
+        v,
+        registry::FILE_PARAM,
+        graph::ParamValue::Text(clip.display().to_string()),
+    );
+    let scrub = registry::VIDEO_MODES
+        .iter()
+        .position(|m| *m == "Scrub")
+        .unwrap() as u32;
+    set(&mut g, v, "mode", graph::ParamValue::Choice(scrub));
+    set(&mut g, v, "fit", graph::ParamValue::Choice(2)); // stretch: fills the frame
+
+    set(&mut g, v, "position", graph::ParamValue::Float(0.0));
+    let Some((dark, _)) = render_until(&g, out, |px| px[px.len() / 2 + 3] == 255) else {
+        return;
+    };
+    set(&mut g, v, "position", graph::ParamValue::Float(1.0));
+    let (light, ev) = render_until(&g, out, |px| brightness(px) > 300.0).unwrap();
+    assert!(
+        brightness(&light) > brightness(&dark) + 200.0,
+        "start {} end {}",
+        brightness(&dark),
+        brightness(&light)
+    );
+    assert!(
+        ev.media_info(v)
+            .is_some_and(|i| i.contains("frame 20 / 20")),
+        "{:?}",
+        ev.media_info(v)
+    );
+}

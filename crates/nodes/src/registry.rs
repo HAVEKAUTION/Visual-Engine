@@ -29,6 +29,20 @@ pub const COUNTER: &str = "counter";
 pub const SAMPLE_HOLD: &str = "sample_hold";
 pub const RANDOM: &str = "random";
 pub const HOLD: &str = "hold";
+pub const IMAGE: &str = "image";
+pub const VIDEO: &str = "video";
+/// Video playback modes.
+pub const VIDEO_MODES: &[&str] = &["Loop", "Ping-pong", "Play once", "Beat-locked", "Scrub"];
+/// The media nodes' parameter holding the file path.
+pub const FILE_PARAM: &str = "file";
+/// The shader inside the Image / Video nodes (not in the scenes library).
+pub const MEDIA_SHADER: &str = "media_fit.wgsl";
+pub const MEDIA_SHADER_SRC: &str = include_str!("../shaders/media_fit.wgsl");
+
+/// Is this an Image or Video node?
+pub fn is_media_kind(kind: &str) -> bool {
+    kind == IMAGE || kind == VIDEO
+}
 /// Units for Hold's length.
 pub const HOLD_UNITS: &[&str] = &["beats", "bars", "seconds"];
 
@@ -224,6 +238,59 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
             value_out(),
             vec![num("steps", "Steps", 2.0, 64.0, 4.0)],
         ),
+        IMAGE | VIDEO => {
+            let file = ParamDef {
+                label: "File".into(),
+                default: ParamValue::Text(String::new()),
+                min: 0.0,
+                max: 0.0,
+                ..ParamDef::float(FILE_PARAM, 0.0, 0.0, 0.0)
+            };
+            let place = [
+                pick(
+                    "fit",
+                    "Fit",
+                    &["Fit (show all)", "Fill (crop)", "Stretch"],
+                    1,
+                ),
+                toggle("mirror", "Mirror", false),
+                num("scale", "Scale", 0.1, 4.0, 1.0),
+            ];
+            if kind == IMAGE {
+                return Some(spec(
+                    "Image",
+                    vec![],
+                    vec![PortDef::new(IMAGE_OUT, PortType::Image)],
+                    std::iter::once(file).chain(place).collect(),
+                ));
+            }
+            spec(
+                "Video",
+                vec![
+                    trig_in("restart", "Restart"),
+                    trig_in("jump", "Jump (random)"),
+                    sig_in("hold", "Hold (freeze)"),
+                ],
+                vec![PortDef::new(IMAGE_OUT, PortType::Image)],
+                std::iter::once(file)
+                    .chain([
+                        pick("mode", "Playback", VIDEO_MODES, 0),
+                        num("speed", "Speed", -4.0, 4.0, 1.0),
+                        num("bars", "Length in bars (beat-locked)", 0.25, 64.0, 4.0),
+                        num("position", "Position (scrub)", 0.0, 1.0, 0.0),
+                        num("start", "Start at", 0.0, 1.0, 0.0),
+                        num("end", "End at", 0.0, 1.0, 1.0),
+                    ])
+                    .chain(place)
+                    .chain([pick(
+                        "quality",
+                        "Decode size",
+                        &["Low (640)", "Medium (960)", "High (1280)", "Full (1920)"],
+                        2,
+                    )])
+                    .collect(),
+            )
+        }
         HOLD => spec(
             "Hold",
             vec![trig_in("start", "Start"), trig_in("stop", "Stop")],
@@ -444,6 +511,16 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
             GATE,
             Category::Trigger,
             "Fires when a signal rises above a threshold.",
+        ),
+        (
+            IMAGE,
+            Category::Source,
+            "A picture file (PNG, JPG, WebP...). Wire it through effects and let the music bend it.",
+        ),
+        (
+            VIDEO,
+            Category::Source,
+            "A video file: loop, ping-pong, lock it to the beat, scrub it with a signal,              jump or freeze it on triggers.",
         ),
         (PROGRAM_OUT, Category::Output, "The final picture."),
     ];

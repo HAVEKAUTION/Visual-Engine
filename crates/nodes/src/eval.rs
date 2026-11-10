@@ -6,12 +6,17 @@
 //! - A node whose shader breaks keeps showing its last good frame (or passes
 //!   its input through) and reports the error; the output never stops.
 //! - Bypassed nodes pass their first picture input straight through.
-//! - Given the same graph, signals and time steps, the output is the same.
+//! - Given the same graph, signals and time steps, the output is the same
+//!   (video frames arrive from a background decoder, so live playback shows
+//!   the nearest decoded frame; export will wait for exact frames).
+//! - Image / Video nodes read files through [`media::MediaLibrary`] and draw
+//!   them with a small built-in shader (fit / fill / stretch, mirror, scale).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use graph::{Graph, Node, NodeId, Param, ParamValue};
-use render::{Renderer, ScenePipeline, Show};
+use media::{MediaLibrary, Quality, Status};
+use render::{MEDIA_KEY, Renderer, ScenePipeline, Show};
 use scenes::{CompiledScene, ParamState, SceneLibrary, SignalState};
 use signals::modulation::{ModContext, Modulator, Wave, random_walk};
 
@@ -266,6 +271,74 @@ fn signal_node(kind: &str, st: &mut SigState, i: &SigIn) -> f32 {
     }
 }
 
+/// Where a Video node's playhead is.
+#[derive(Clone, Debug, Default)]
+struct Play {
+    /// 0..1 through the clip (0..2 for ping-pong: there and back).
+    pos: f64,
+    /// Beat position the beat-locked clip started at.
+    mark: f64,
+    jumps: u64,
+    started: bool,
+}
+
+/// A Video node's settings this frame (after modulation).
+struct VideoKnobs {
+    mode: usize,
+    speed: f64,
+    bars: f64,
+    position: f64,
+    start: f64,
+    end: f64,
+    quality: Quality,
+    restart: bool,
+    jump: bool,
+    hold: bool,
+}
+
+fn hash01(n: u64) -> f64 {
+    let mut z = n.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    ((z ^ (z >> 31)) >> 11) as f64 / (1u64 << 53) as f64
+}
+
+impl Play {
+    /// Move the playhead by one frame and return where it is, 0..1 within
+    /// the trimmed part of the clip.
+    fn step(&mut self, k: &VideoKnobs, dt: f64, beats: f64, clip_secs: f64, seed: u64) -> f64 {
+        let lap = (k.bars * 4.0).max(0.25);
+        if !self.started || k.restart {
+            self.started = true;
+            self.pos = 0.0;
+            self.mark = beats;
+        }
+        if k.jump {
+            self.jumps += 1;
+            let r = hash01(seed.wrapping_mul(1_000_003) ^ self.jumps);
+            self.pos = r;
+            self.mark = beats - r * lap;
+        }
+        let rate = k.speed / clip_secs.max(1e-3);
+        if !k.hold {
+            match VIDEO_MODES.get(k.mode).copied().unwrap_or("Loop") {
+                "Ping-pong" => self.pos = (self.pos + dt * rate).rem_euclid(2.0),
+                "Play once" => self.pos = (self.pos + dt * rate).clamp(0.0, 1.0),
+                "Beat-locked" => {
+                    self.pos = ((beats - self.mark) / lap * k.speed).rem_euclid(1.0);
+                }
+                "Scrub" => self.pos = k.position.clamp(0.0, 1.0),
+                _ => self.pos = (self.pos + dt * rate).rem_euclid(1.0),
+            }
+        }
+        if self.pos > 1.0 {
+            2.0 - self.pos // ping-pong on the way back
+        } else {
+            self.pos
+        }
+    }
+}
+
 /// What the evaluator needs from the outside each frame.
 pub struct FrameInput<'a> {
     /// This frame's signals (already updated by the caller).
@@ -354,6 +427,11 @@ pub struct Evaluator {
     sig: HashMap<NodeId, SigState>,
     /// Problems by node, shown as badges.
     pub errors: BTreeMap<NodeId, String>,
+    /// Image and video files in use.
+    media: MediaLibrary,
+    play: HashMap<NodeId, Play>,
+    /// What each media node is showing ("1920×1080 · 30 fps · frame 12 / 300").
+    media_info: HashMap<NodeId, String>,
 }
 
 impl Evaluator {
@@ -367,7 +445,20 @@ impl Evaluator {
             live: HashMap::new(),
             sig: HashMap::new(),
             errors: BTreeMap::new(),
+            media: MediaLibrary::new(),
+            play: HashMap::new(),
+            media_info: HashMap::new(),
         }
+    }
+
+    /// A line about what an Image / Video node shows (size, rate, frame).
+    pub fn media_info(&self, node: NodeId) -> Option<&str> {
+        self.media_info.get(&node).map(|s| s.as_str())
+    }
+
+    /// Read a media file again (after it was edited or relinked).
+    pub fn reload_media(&mut self, path: &std::path::Path) {
+        self.media.reload(path);
     }
 
     /// The renderer key of a node's picture.
@@ -394,6 +485,7 @@ impl Evaluator {
             .entry(file.to_string())
             .or_insert_with(|| match library.get(file) {
                 Some(e) => scenes::compile(&e.source, file),
+                None if file == MEDIA_SHADER => scenes::compile(MEDIA_SHADER_SRC, file),
                 None => Err(format!("{file} is not in the scenes folder")),
             })
             .clone()
@@ -478,6 +570,8 @@ impl Evaluator {
         // Forget nodes that were deleted.
         self.rt.retain(|id, _| graph.node(*id).is_some());
         self.sig.retain(|id, _| graph.node(*id).is_some());
+        self.play.retain(|id, _| graph.node(*id).is_some());
+        self.media_info.clear();
         let main: BTreeSet<NodeId> = graph.plan(targets).into_iter().collect();
         let all: Vec<NodeId> = targets.iter().chain(previews).copied().collect();
 
@@ -563,7 +657,13 @@ impl Evaluator {
                     image.insert(id, src);
                 }
                 kind => {
-                    let Some(file) = registry::shader_file(kind) else {
+                    let is_media = registry::is_media_kind(kind);
+                    let file = if is_media {
+                        Some(MEDIA_SHADER)
+                    } else {
+                        registry::shader_file(kind)
+                    };
+                    let Some(file) = file else {
                         self.errors
                             .insert(id, format!("unknown node type \"{kind}\""));
                         image.insert(id, first_input(&image));
@@ -595,6 +695,30 @@ impl Evaluator {
                     if let Err(e) = self.prepare(node, file, library, renderer) {
                         self.errors.insert(id, e);
                     }
+                    // Media nodes: their file's picture goes in as the input.
+                    let mut media_key = None;
+                    if is_media {
+                        match self.media_frame(
+                            graph,
+                            node,
+                            renderer,
+                            &ctx,
+                            input.dt,
+                            beats,
+                            input.intensity,
+                        ) {
+                            Ok(Some(k)) => media_key = Some(k),
+                            Ok(None) => {
+                                image.insert(id, None);
+                                continue;
+                            }
+                            Err(e) => {
+                                self.errors.insert(id, e);
+                                image.insert(id, None);
+                                continue;
+                            }
+                        }
+                    }
                     let key = self.key(id);
                     let Some(rt) = self.rt.get_mut(&id) else {
                         // Never built: pass the input through.
@@ -611,12 +735,15 @@ impl Evaluator {
                     }
                     rt.params.advance(input.signals, input.dt);
                     input.signals.set_palette(&rt.params.current_palette());
-                    let inputs: [Option<u64>; 2] = std::array::from_fn(|i| {
+                    let mut inputs: [Option<u64>; 2] = std::array::from_fn(|i| {
                         meta.images
                             .get(i)
                             .and_then(|img| graph.input_link(id, &img.name))
                             .and_then(|l| image.get(&l.from.node).copied().flatten())
                     });
+                    if let Some(k) = media_key {
+                        inputs = [Some(k), None];
+                    }
                     // Nodes only shown as thumbnails render at a quarter size.
                     let scale = if main.contains(&id) { 1.0 } else { 0.25 };
                     let size =
@@ -645,10 +772,153 @@ impl Evaluator {
             }
         }
         self.pictures = image;
+        self.media.end_frame();
         targets
             .first()
             .map(|t| self.picture(*t))
             .unwrap_or(Show::Black)
+    }
+
+    /// Get the picture an Image / Video node shows this frame into the
+    /// renderer. `Ok(None)` = nothing to show yet (no file, still loading).
+    #[allow(clippy::too_many_arguments)]
+    fn media_frame(
+        &mut self,
+        graph: &Graph,
+        node: &Node,
+        renderer: &mut Renderer,
+        ctx: &ModContext,
+        dt: f32,
+        beats: f64,
+        intensity: f32,
+    ) -> Result<Option<u64>, String> {
+        let id = node.id;
+        let key = MEDIA_KEY | self.key(id);
+        let path = match node.param(FILE_PARAM).map(|p| &p.value) {
+            Some(ParamValue::Text(t)) if !t.trim().is_empty() => std::path::PathBuf::from(t.trim()),
+            _ => {
+                self.media_info.insert(
+                    id,
+                    "No file yet: pick one in the Inspector, or drag one from the Media pool."
+                        .into(),
+                );
+                return Ok(None);
+            }
+        };
+        if !path.exists() {
+            return Err(format!(
+                "File not found: {}. Use \"Find file…\" in the Inspector to relink it.",
+                path.display()
+            ));
+        }
+        // Keep showing the last picture while the next one loads.
+        let keep = |renderer: &mut Renderer| {
+            if renderer.media_picture(key).is_some() {
+                renderer.keep_media(key);
+                Some(key)
+            } else {
+                None
+            }
+        };
+        let show = |renderer: &mut Renderer, pic: &media::Picture| {
+            if renderer.media_picture(key) == Some(pic.id) {
+                renderer.keep_media(key);
+            } else {
+                renderer.upload_media(key, (pic.width, pic.height), pic.id, &pic.rgba);
+            }
+            Some(key)
+        };
+        if node.kind == IMAGE {
+            return match self.media.image(&path) {
+                Status::Ready(pic) => {
+                    self.media_info
+                        .insert(id, format!("{} × {}", pic.width, pic.height));
+                    Ok(show(renderer, &pic))
+                }
+                Status::Loading => {
+                    self.media_info.insert(id, "Loading…".into());
+                    Ok(keep(renderer))
+                }
+                Status::Failed(e) => Err(e),
+            };
+        }
+
+        // Video: settings after modulation, plus its trigger / gate inputs.
+        let num = |name: &str, d: f32| {
+            node.param(name)
+                .map(|p| effective_value(graph, id, p, ctx, &self.values, intensity))
+                .unwrap_or(d) as f64
+        };
+        let choice = |name: &str| match node.param(name).map(|p| &p.value) {
+            Some(ParamValue::Choice(c)) => *c,
+            _ => 0,
+        };
+        let input = |port: &str| {
+            graph
+                .input_link(id, port)
+                .and_then(|l| self.values.get(&l.from.node).copied())
+                .unwrap_or(0.0)
+                > 0.5
+        };
+        let knobs = VideoKnobs {
+            mode: choice("mode") as usize,
+            speed: num("speed", 1.0),
+            bars: num("bars", 4.0),
+            position: num("position", 0.0),
+            start: num("start", 0.0),
+            end: num("end", 1.0),
+            quality: Quality::from_index(choice("quality")),
+            restart: input("restart"),
+            jump: input("jump"),
+            hold: input("hold"),
+        };
+        for p in node.params.iter().filter(|p| p.def.is_modulatable()) {
+            let v = effective_value(graph, id, p, ctx, &self.values, intensity);
+            self.live.insert((id, p.def.name.clone()), v);
+        }
+        let stream = self.media.video(&path, knobs.quality);
+        let info = match stream.info() {
+            Status::Ready(i) => i,
+            Status::Loading => {
+                self.media_info.insert(id, "Opening…".into());
+                return Ok(keep(renderer));
+            }
+            Status::Failed(e) => return Err(e),
+        };
+        let (a, b) = (
+            knobs.start.min(knobs.end).clamp(0.0, 1.0),
+            knobs.start.max(knobs.end).clamp(0.0, 1.0),
+        );
+        let span = (b - a).max(1e-4);
+        let t = self.play.entry(id).or_default().step(
+            &knobs,
+            dt as f64,
+            beats,
+            info.seconds * span,
+            id.0 as u64,
+        );
+        let last = (info.frames - 1).max(0);
+        let frame = (((a + t * span) * last as f64).round() as i64).clamp(0, last);
+        stream.request(frame);
+        let pic = stream.frame_near(frame);
+        let (dw, dh) = info.decode_size(knobs.quality);
+        self.media_info.insert(
+            id,
+            format!(
+                "{} × {} ({dw} × {dh}) · {:.2} fps · {:.1} s · {} · frame {} / {}",
+                info.width,
+                info.height,
+                info.fps,
+                info.seconds,
+                info.codec,
+                frame + 1,
+                info.frames
+            ),
+        );
+        Ok(match pic {
+            Some(p) => show(renderer, &p),
+            None => keep(renderer),
+        })
     }
 }
 
@@ -884,5 +1154,66 @@ mod signal_tests {
         for (got, want) in out.iter().zip([1.0, 1.0, 0.75, 0.5, 0.25, 0.0, 0.0, 0.0]) {
             assert!((got - want).abs() < 1e-5, "{out:?}");
         }
+    }
+
+    fn knobs(mode: &str) -> VideoKnobs {
+        VideoKnobs {
+            mode: VIDEO_MODES.iter().position(|m| *m == mode).unwrap(),
+            speed: 1.0,
+            bars: 1.0,
+            position: 0.3,
+            start: 0.0,
+            end: 1.0,
+            quality: Quality::Low,
+            restart: false,
+            jump: false,
+            hold: false,
+        }
+    }
+
+    #[test]
+    fn video_playheads_follow_their_mode() {
+        // A 2 s clip, 0.5 s steps.
+        let run = |k: &VideoKnobs, steps: usize| {
+            let mut p = Play::default();
+            (0..steps)
+                .map(|i| p.step(k, 0.5, i as f64, 2.0, 1))
+                .collect::<Vec<f64>>()
+        };
+        // First frame starts at 0 and moves; loop wraps.
+        assert_eq!(
+            run(&knobs("Loop"), 6),
+            vec![0.25, 0.5, 0.75, 0.0, 0.25, 0.5]
+        );
+        // Ping-pong goes there and back.
+        assert_eq!(
+            run(&knobs("Ping-pong"), 8),
+            vec![0.25, 0.5, 0.75, 1.0, 0.75, 0.5, 0.25, 0.0]
+        );
+        // Play once stops at the end.
+        assert_eq!(
+            run(&knobs("Play once"), 6),
+            vec![0.25, 0.5, 0.75, 1.0, 1.0, 1.0]
+        );
+        // Beat-locked: 1 bar = 4 beats per lap, whatever the clip length.
+        assert_eq!(
+            run(&knobs("Beat-locked"), 6),
+            vec![0.0, 0.25, 0.5, 0.75, 0.0, 0.25]
+        );
+        // Scrub follows the position knob.
+        assert_eq!(run(&knobs("Scrub"), 2), vec![0.3, 0.3]);
+        // Hold freezes; jump lands somewhere repeatable.
+        let mut p = Play::default();
+        let mut k = knobs("Loop");
+        p.step(&k, 0.5, 0.0, 2.0, 1);
+        k.hold = true;
+        assert_eq!(p.step(&k, 0.5, 1.0, 2.0, 1), 0.25);
+        k.hold = false;
+        k.jump = true;
+        let a = p.step(&k, 0.0, 2.0, 2.0, 1);
+        let mut q = Play::default();
+        q.step(&knobs("Loop"), 0.5, 0.0, 2.0, 1);
+        assert_eq!(q.step(&k, 0.0, 2.0, 2.0, 1), a);
+        assert!((0.0..1.0).contains(&a));
     }
 }

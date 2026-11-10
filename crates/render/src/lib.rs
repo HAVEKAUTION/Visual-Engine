@@ -94,7 +94,8 @@ impl Tex {
             format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
+                | wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -151,6 +152,20 @@ pub enum Show {
     Deck(usize),
     /// A graph node's latest frame (key from [`Renderer::render_node`]).
     Node(u64),
+}
+
+/// Keys of media textures (images, video frames) have this bit set, so they
+/// never clash with node keys.
+pub const MEDIA_KEY: u64 = 1 << 62;
+/// Format of uploaded media (straight RGBA8, display space like the scenes).
+pub const MEDIA_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// An uploaded picture.
+struct MediaTex {
+    tex: Tex,
+    size: (u32, u32),
+    /// Which picture is in it (see [`Renderer::upload_media`]).
+    picture: u64,
 }
 
 /// Graph-node targets kept for reuse (by size) after a node stops being drawn.
@@ -210,6 +225,9 @@ pub struct Renderer {
     generation: u64,
     /// GPU time per node (None if the GPU can't measure it).
     profiler: Option<Profiler>,
+    /// Uploaded media by key, and which were used this frame.
+    media: HashMap<u64, MediaTex>,
+    media_used: HashSet<u64>,
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -379,6 +397,8 @@ impl Renderer {
             display: None,
             generation: 0,
             profiler: Profiler::new(device, queue),
+            media: HashMap::new(),
+            media_used: HashSet::new(),
         }
     }
 
@@ -514,7 +534,14 @@ impl Renderer {
             }
         };
         let slot = self.profiler.as_mut().and_then(|p| p.slot(key));
-        let views = inputs.map(|k| k.and_then(|k| self.nodes.get(&k)).map(|t| t.latest()));
+        let views = inputs.map(|k| {
+            k.and_then(|k| {
+                self.nodes
+                    .get(&k)
+                    .map(|t| t.latest())
+                    .or_else(|| self.media.get(&k).map(|m| &m.tex.view))
+            })
+        });
         self.draw(&mut t, scene, signals, params, views, slot);
         self.nodes.insert(key, t);
     }
@@ -543,6 +570,8 @@ impl Renderer {
         if let Some(p) = &mut self.profiler {
             p.finish(&self.device, &self.queue);
         }
+        let used = std::mem::take(&mut self.media_used);
+        self.media.retain(|k, _| used.contains(k));
         let used = std::mem::take(&mut self.used);
         let stale: Vec<u64> = self
             .nodes
@@ -557,6 +586,70 @@ impl Renderer {
         }
         while self.pool.len() > POOL_LIMIT {
             self.pool.remove(0);
+        }
+    }
+
+    /// Put a picture (straight RGBA8, `size.0 * size.1 * 4` bytes) into the
+    /// media texture `key` (use keys with [`MEDIA_KEY`] set), to feed nodes
+    /// through `render_node` inputs. `picture` identifies the picture: the
+    /// same one isn't uploaded twice. Media not used in a frame is freed.
+    pub fn upload_media(&mut self, key: u64, size: (u32, u32), picture: u64, rgba: &[u8]) {
+        self.media_used.insert(key);
+        if size.0 == 0 || size.1 == 0 || rgba.len() < (size.0 * size.1 * 4) as usize {
+            return;
+        }
+        let size = (size.0.min(MAX_SIZE), size.1.min(MAX_SIZE));
+        if let Some(m) = self.media.get(&key)
+            && m.size == size
+            && m.picture == picture
+        {
+            return;
+        }
+        let fresh = !matches!(self.media.get(&key), Some(m) if m.size == size);
+        if fresh {
+            self.media.insert(
+                key,
+                MediaTex {
+                    tex: Tex::new(&self.device, "media", size, MEDIA_FORMAT),
+                    size,
+                    picture,
+                },
+            );
+        }
+        let Some(m) = self.media.get_mut(&key) else {
+            return;
+        };
+        m.picture = picture;
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &m.tex.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * size.0),
+                rows_per_image: Some(size.1),
+            },
+            wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
+
+    /// Which picture media `key` holds (to skip re-uploading), if any.
+    pub fn media_picture(&self, key: u64) -> Option<u64> {
+        self.media.get(&key).map(|m| m.picture)
+    }
+
+    /// Keep media `key` alive this frame without uploading.
+    pub fn keep_media(&mut self, key: u64) {
+        if self.media.contains_key(&key) {
+            self.media_used.insert(key);
         }
     }
 

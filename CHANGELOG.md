@@ -2,6 +2,22 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M4 part 1: pictures and videos
+- New `media` crate. Pictures (PNG, JPG, WebP, BMP, GIF, TIFF) load in the background.
+  Videos are decoded by the ffmpeg program in a background process (H.264, H.265,
+  ProRes, VP9, AV1, HAP...) into a frame cache, so loops and scrubbing are smooth;
+  the renderer never waits for them.
+- New **Image** and **Video** nodes (Sources). Fit / Fill / Stretch, mirror, scale.
+  Video playback: Loop, Ping-pong, Play once, Beat-locked (one lap = N bars), Scrub
+  (position follows a signal); speed can be driven by any signal; Restart and Jump
+  (random) triggers and a Hold (freeze) input; start/end trim; decode size.
+- Media pool (left panel): Import, thumbnails, drag into the graph (or double-click).
+  Drop files from Explorer / Finder onto the window: pictures and videos join the pool
+  (and land in the graph where you drop them), songs open.
+- Missing files: the node shows an error, the Inspector lists what's missing and finds
+  it again by name in a folder you pick; "Find file…" relinks one by hand.
+- Renderer: media textures (uploaded only when the picture changes).
+
 ## 2026-11-10 — Editor polish: node size, per-node pictures, Hold node
 - Ctrl+scroll makes nodes and their text bigger or smaller (80–160%, remembered);
   plain scroll still zooms the view. Nodes start 15% bigger, wires a bit bolder.

@@ -43,6 +43,7 @@ struct Prefs {
     show_fps: bool,
     show_cost: bool,
     node_scale: f32,
+    media_pool: Vec<std::path::PathBuf>,
 }
 
 impl Default for Prefs {
@@ -60,6 +61,7 @@ impl Default for Prefs {
             show_fps: true,
             show_cost: true,
             node_scale: crate::graph_editor::DEFAULT_NODE_SCALE,
+            media_pool: Vec::new(),
         }
     }
 }
@@ -158,6 +160,9 @@ impl VisualEngineApp {
         app.scene.ws.editor.snap = prefs.snap;
         app.scene.ws.editor.thumbnails = prefs.thumbnails;
         app.scene.ws.editor.show_cost = prefs.show_cost;
+        for p in &prefs.media_pool {
+            app.scene.ws.pool.add(p);
+        }
         app.scene.ws.editor.node_scale = prefs.node_scale.clamp(
             *crate::graph_editor::NODE_SCALE.start(),
             *crate::graph_editor::NODE_SCALE.end(),
@@ -283,6 +288,13 @@ impl VisualEngineApp {
     }
 
     fn side_panel(&mut self, ui: &mut egui::Ui) {
+        // ---------------- Media pool ----------------
+        if self.scene.graph_mode {
+            ui.label(RichText::new("PICTURES & VIDEOS").strong());
+            ui.separator();
+            self.scene.ws.pool_ui(ui);
+            ui.add_space(10.0);
+        }
         // ---------------- Song file ----------------
         ui.label(RichText::new("SONG FILE").strong());
         ui.separator();
@@ -1002,6 +1014,7 @@ impl eframe::App for VisualEngineApp {
             show_fps: self.show_fps,
             show_cost: ws.editor.show_cost,
             node_scale: ws.editor.node_scale,
+            media_pool: ws.pool.items.clone(),
         };
         eframe::set_value(storage, PREFS_KEY, &prefs);
     }
@@ -1054,6 +1067,48 @@ impl eframe::App for VisualEngineApp {
             }
         }
         self.scene.handle_keys(ui.ctx());
+        let (dropped, hovering, pointer) = ui.input(|i| {
+            (
+                i.raw.dropped_files.clone(),
+                !i.raw.hovered_files.is_empty(),
+                i.pointer.hover_pos(),
+            )
+        });
+        for f in dropped {
+            let path = f.path().to_path_buf();
+            if path.as_os_str().is_empty() {
+                continue;
+            }
+            match media::kind_of(&path) {
+                Some(media::Kind::Audio) => self.load_song(path),
+                Some(_) => {
+                    let ws = &mut self.scene.ws;
+                    ws.pool.add(&path);
+                    if self.scene.graph_mode
+                        && self.show_graph
+                        && let Some(p) = pointer.filter(|p| ws.editor.last_rect.contains(*p))
+                    {
+                        ws.editor.pending_media.push((path, p));
+                    }
+                }
+                None => {}
+            }
+        }
+        if hovering {
+            let rect = ui.ctx().content_rect();
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::unique("file-hover"),
+            ));
+            painter.rect_filled(rect, 0.0, Color32::from_black_alpha(140));
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Drop pictures or videos (onto the graph to add them there), or a song",
+                egui::FontId::proportional(18.0),
+                crate::theme::ACCENT,
+            );
+        }
         let (f11, esc, m, f) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::F11),

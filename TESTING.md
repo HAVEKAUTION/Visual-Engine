@@ -316,6 +316,43 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M4 part 1 – Pictures and videos
+
+Needs ffmpeg for video (you have it). On another PC: Windows `winget install Gyan.FFmpeg`,
+macOS `brew install ffmpeg`, then restart the app. Pictures work without it.
+
+Run: `cargo run --release -p app`
+
+**Bringing media in**
+- [ ] Left panel → **PICTURES & VIDEOS** → **Import…**, pick a picture and a video.
+      They appear with small thumbnails.
+- [ ] Drag a file from Explorer straight onto the graph: it joins the pool *and* a node
+      appears where you let go. Drop a song file anywhere: it opens.
+- [ ] Drag a pool item into the graph (or double-click it): an Image / Video node,
+      named after the file, already showing its picture.
+- [ ] Wire it into Program Out (or into Transform → Program Out). It shows in the viewer.
+
+**Make it move with the music**
+- [ ] Video → Inspector → Playback **Beat-locked**, Length 1 bar: the clip restarts in
+      time with every bar (play a song first).
+- [ ] Playback **Scrub**, then drag a blue wire from an **Audio Signal** (Bass) onto
+      **Position**: the bass moves the playhead.
+- [ ] **Audio Trigger** (Kick) → the Video's **Jump** plug: it jumps to a new spot on
+      every kick. **Restart** instead: back to the start on every kick.
+- [ ] **Hold** node (Start = Drop, Stop = Hat) → the Video's **Hold (freeze)**: the
+      video freezes on the drop until the next hat.
+- [ ] Wire Speed: Audio Signal (Loudness) → Speed. Louder = faster.
+- [ ] Image → Transform (Kick punch up) → Program Out: the picture punches on kicks.
+
+**Safety**
+- [ ] Rename or move a used file, restart the app: the node shows ⚠ and black, the
+      Inspector says what's missing. **Look in a folder…** finds it again.
+- [ ] A broken / non-video file shows an error on the node; the app keeps running.
+
+Known gaps (M4 part 2): cameras, video signals (motion, brightness, hue for the bus),
+latency calibration. Video sound is ignored (the music comes from the song / input).
+Masks and blend modes come with M5.
+
 ## Editor polish – node size, per-node pictures, Hold
 
 - [ ] Hold **Ctrl** and scroll over the graph: nodes and their text grow / shrink (a

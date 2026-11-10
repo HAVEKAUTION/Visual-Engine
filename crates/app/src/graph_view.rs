@@ -12,12 +12,13 @@ use graph::{
     PublishedParam, Resolution,
 };
 use nodes::Evaluator;
-use nodes::registry::{self, AUDIO_SIGNAL, CatalogueEntry, PROGRAM_OUT};
+use nodes::registry::{self, AUDIO_SIGNAL, CatalogueEntry, FILE_PARAM, PROGRAM_OUT};
 use scenes::SceneLibrary;
 use scenes::uniforms::SIGNAL_NAMES;
 use signals::modulation::Source;
 
 use crate::graph_editor::{self, ACCENT, Editor, GROUP_COLOUR, port_colour};
+use crate::media_pool::{MediaPool, PoolAction};
 use crate::mod_editor::{self, MOD_COLOR, SIGNAL_SOURCES};
 
 const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
@@ -93,6 +94,13 @@ pub struct Workspace {
     pub thumbs: HashMap<NodeId, egui::TextureId>,
     /// GPU milliseconds per node and in total (None: the GPU can't tell).
     pub gpu: Option<(HashMap<NodeId, f32>, f32)>,
+    /// Pictures and videos brought in.
+    pub pool: MediaPool,
+    /// Media files the graph uses that aren't on disk (checked now and then).
+    pub missing: Vec<PathBuf>,
+    missing_checked: Option<Instant>,
+    /// Result of the last "look in a folder" relink.
+    relink_note: Option<String>,
 }
 
 impl Workspace {
@@ -132,6 +140,117 @@ impl Workspace {
             wipe: 0.5,
             thumbs: HashMap::new(),
             gpu: None,
+            pool: MediaPool::default(),
+            missing: Vec::new(),
+            missing_checked: None,
+            relink_note: None,
+        }
+    }
+
+    /// Every media file the graph uses, with the nodes using it.
+    pub fn media_files(&self) -> Vec<(PathBuf, Vec<NodeId>)> {
+        let mut out: Vec<(PathBuf, Vec<NodeId>)> = Vec::new();
+        for n in self.graph.nodes() {
+            if let Some(ParamValue::Text(t)) = n.param(FILE_PARAM).map(|p| &p.value)
+                && registry::is_media_kind(&n.kind)
+                && !t.trim().is_empty()
+            {
+                let p = PathBuf::from(t.trim());
+                match out.iter_mut().find(|(q, _)| *q == p) {
+                    Some((_, ids)) => ids.push(n.id),
+                    None => out.push((p, vec![n.id])),
+                }
+            }
+        }
+        out
+    }
+
+    /// Point every node using `from` at `to` (one undo step).
+    pub fn relink(&mut self, from: &std::path::Path, to: &std::path::Path) {
+        let cmds: Vec<Command> = self
+            .media_files()
+            .into_iter()
+            .filter(|(p, _)| p == from)
+            .flat_map(|(_, ids)| ids)
+            .map(|node| Command::SetParam {
+                node,
+                param: FILE_PARAM.into(),
+                value: ParamValue::Text(to.display().to_string()),
+            })
+            .collect();
+        if !cmds.is_empty() {
+            let _ = self.history.exec(&mut self.graph, Command::Batch(cmds));
+        }
+        self.pool.items.retain(|p| p != from);
+        self.pool.add(to);
+        self.eval.reload_media(to);
+        self.missing_checked = None;
+    }
+
+    /// Look for each missing file by name inside `folder` (and below).
+    fn relink_from_folder(&mut self, folder: &std::path::Path) {
+        let wanted: Vec<PathBuf> = self.missing.clone();
+        let mut found = 0;
+        let mut seen = 0usize;
+        let mut stack = vec![(folder.to_path_buf(), 0)];
+        let mut hits: HashMap<std::ffi::OsString, PathBuf> = HashMap::new();
+        while let Some((dir, depth)) = stack.pop() {
+            let Ok(rd) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for e in rd.flatten() {
+                seen += 1;
+                if seen > 50_000 {
+                    break;
+                }
+                let p = e.path();
+                if p.is_dir() {
+                    if depth < 6 {
+                        stack.push((p, depth + 1));
+                    }
+                } else if let Some(name) = p.file_name() {
+                    hits.entry(name.to_os_string()).or_insert(p);
+                }
+            }
+        }
+        for w in &wanted {
+            if let Some(name) = w.file_name()
+                && let Some(to) = hits.get(name).cloned()
+            {
+                self.relink(w, &to);
+                found += 1;
+            }
+        }
+        self.relink_note = Some(format!(
+            "Found {found} of {} missing file{}.",
+            wanted.len(),
+            if wanted.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    /// Keep `missing` and the pool up to date (cheap; every 2 s).
+    pub fn check_media(&mut self) {
+        if self
+            .missing_checked
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(2))
+        {
+            return;
+        }
+        self.missing_checked = Some(Instant::now());
+        let files = self.media_files();
+        self.pool.sync(files.iter().map(|(p, _)| p.as_path()));
+        self.missing = files
+            .into_iter()
+            .map(|(p, _)| p)
+            .filter(|p| !p.exists())
+            .collect();
+    }
+
+    /// The Media pool panel.
+    pub fn pool_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(PoolAction::AddToGraph(p)) = self.pool.ui(ui) {
+            let at = self.editor.last_rect.center();
+            self.editor.pending_media.push((p, at));
         }
     }
 
@@ -265,6 +384,40 @@ impl Workspace {
                 });
             if close {
                 self.notice = None;
+            }
+            ui.add_space(6.0);
+        }
+        self.check_media();
+        if !self.missing.is_empty() {
+            let mut pick_folder = false;
+            egui::Frame::group(ui.style())
+                .fill(Color32::from_rgb(40, 26, 26))
+                .show(ui, |ui| {
+                    let n = self.missing.len();
+                    ui.label(
+                        RichText::new(format!(
+                            "{n} media file{} can't be found",
+                            if n == 1 { "" } else { "s" }
+                        ))
+                        .color(ERROR_COLOR),
+                    );
+                    for p in self.missing.iter().take(4) {
+                        ui.label(RichText::new(p.display().to_string()).small().weak());
+                    }
+                    ui.label(
+                        RichText::new(
+                            "Those nodes show black until relinked. Point me at a folder and \
+                             I'll find them by name, or use Find file… on each node.",
+                        )
+                        .small(),
+                    );
+                    pick_folder = ui.button("📂 Look in a folder…").clicked();
+                    if let Some(note) = &self.relink_note {
+                        ui.label(RichText::new(note).small().color(ACCENT));
+                    }
+                });
+            if pick_folder && let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                self.relink_from_folder(&dir);
             }
             ui.add_space(6.0);
         }
@@ -411,6 +564,76 @@ impl Workspace {
         for p in &node.params {
             self.param_ui(ui, id, p);
             ui.add_space(4.0);
+        }
+    }
+
+    /// An Image / Video node's file: name, choose, relink, what's playing.
+    fn file_ui(&mut self, ui: &mut egui::Ui, id: NodeId, current: &str) {
+        let path = PathBuf::from(current.trim());
+        let empty = current.trim().is_empty();
+        let missing = !empty && !path.exists();
+        let video = self
+            .graph
+            .node(id)
+            .is_some_and(|n| n.kind == registry::VIDEO);
+        ui.horizontal(|ui| {
+            ui.label("File");
+            let name = if empty {
+                "none".to_string()
+            } else {
+                path.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
+            ui.label(RichText::new(name).color(if missing { ERROR_COLOR } else { Color32::WHITE }))
+                .on_hover_text(path.display().to_string());
+        });
+        ui.horizontal(|ui| {
+            let text = if missing {
+                "🔎 Find file…"
+            } else {
+                "📂 Choose…"
+            };
+            if ui.button(text).clicked() {
+                let exts: Vec<&str> = if video {
+                    media::VIDEO_EXTS.to_vec()
+                } else {
+                    media::IMAGE_EXTS.to_vec()
+                };
+                let mut d = rfd::FileDialog::new()
+                    .add_filter(if video { "Videos" } else { "Pictures" }, &exts);
+                if let Some(dir) = path.parent().filter(|d| d.exists()) {
+                    d = d.set_directory(dir);
+                }
+                if let Some(to) = d.pick_file() {
+                    if missing {
+                        // Relink every node that used the lost file.
+                        self.relink(&path, &to);
+                    } else {
+                        let _ = self.history.exec(
+                            &mut self.graph,
+                            Command::SetParam {
+                                node: id,
+                                param: FILE_PARAM.into(),
+                                value: ParamValue::Text(to.display().to_string()),
+                            },
+                        );
+                        self.pool.add(&to);
+                    }
+                }
+            }
+            if !empty
+                && !missing
+                && ui
+                    .small_button("⟳")
+                    .on_hover_text("Read the file again (after editing it)")
+                    .clicked()
+            {
+                self.eval.reload_media(&path);
+            }
+        });
+        if let Some(info) = self.eval.media_info(id) {
+            ui.label(RichText::new(info).small().weak());
         }
     }
 
@@ -754,6 +977,9 @@ impl Workspace {
                         set(self, ParamValue::Colour(c));
                     }
                 });
+            }
+            ParamValue::Text(t) if p.def.name == FILE_PARAM => {
+                self.file_ui(ui, id, t);
             }
             ParamValue::Text(t) => {
                 let mut t = t.clone();

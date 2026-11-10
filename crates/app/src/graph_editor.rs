@@ -26,6 +26,7 @@ use nodes::registry::{self, CatalogueEntry, Category};
 use scenes::SceneLibrary;
 use serde::{Deserialize, Serialize};
 
+use crate::media_pool::MediaDrop;
 use crate::theme;
 
 pub const ACCENT: Color32 = theme::ACCENT;
@@ -448,6 +449,11 @@ pub struct Editor {
     pub show_cost: bool,
     /// Node and text size (Ctrl+scroll), independent of the view zoom.
     pub node_scale: f32,
+    /// Media files to turn into nodes, at a screen position (dropped from
+    /// the pool or from the OS).
+    pub pending_media: Vec<(std::path::PathBuf, Pos2)>,
+    /// Where the graph was drawn last frame (screen).
+    pub last_rect: Rect,
 }
 
 impl Default for Editor {
@@ -471,6 +477,8 @@ impl Default for Editor {
             show_help: false,
             show_cost: true,
             node_scale: DEFAULT_NODE_SCALE,
+            pending_media: Vec::new(),
+            last_rect: Rect::NOTHING,
         }
     }
 }
@@ -571,6 +579,7 @@ impl Editor {
             self.frame_all(c.graph, rect);
             self.framed = true;
         }
+        self.last_rect = rect;
         let origin = |s: &Self| rect.min + s.pan;
         let to_screen = |s: &Self, p: Pos2| origin(s) + p.to_vec2() * s.zoom;
         let to_graph = |s: &Self, p: Pos2| ((p - origin(s)) / s.zoom).to_pos2();
@@ -1301,6 +1310,21 @@ impl Editor {
             self.run_action(ui, &mut c, a);
         }
 
+        // Media dragged in from the pool.
+        let carrying = egui::DragAndDrop::has_payload_of_type::<MediaDrop>(ui.ctx());
+        if carrying
+            && let Some(p) = pointer.filter(|p| rect.contains(*p))
+            && ui.input(|i| i.pointer.any_released())
+            && let Some(drop) = egui::DragAndDrop::take_payload::<MediaDrop>(ui.ctx())
+        {
+            self.pending_media.push((drop.0.clone(), p));
+        }
+        for (path, at) in std::mem::take(&mut self.pending_media) {
+            let at = if rect.contains(at) { at } else { rect.center() };
+            let gp = to_graph(self, at);
+            self.add_media_node(ui, &mut c, &path, gp);
+        }
+
         // ---- Drawing ----
         painter.rect_filled(rect, 0.0, CANVAS_BG);
         let step = GRID * self.zoom;
@@ -1596,6 +1620,21 @@ impl Editor {
             line.1,
         );
 
+        if carrying && pointer.is_some_and(|p| rect.contains(p)) {
+            painter.rect_stroke(
+                rect.shrink(2.0),
+                6.0,
+                Stroke::new(2.0, ACCENT),
+                StrokeKind::Inside,
+            );
+            painter.text(
+                rect.center_top() + vec2(0.0, 16.0),
+                Align2::CENTER_TOP,
+                "Let go to add it to the graph",
+                FontId::proportional(14.0),
+                ACCENT,
+            );
+        }
         if self.show_help {
             help_overlay(&painter, rect);
         }
@@ -2541,6 +2580,44 @@ impl Editor {
             Err(e) => {
                 self.say(ui, e.to_string());
             }
+        }
+    }
+
+    /// An Image or Video node showing `path`, centred at `at` (graph units).
+    fn add_media_node(&mut self, ui: &egui::Ui, c: &mut Ctx, path: &std::path::Path, at: Pos2) {
+        let kind = match media::kind_of(path) {
+            Some(media::Kind::Image) => registry::IMAGE,
+            Some(media::Kind::Video) => registry::VIDEO,
+            _ => return self.say(ui, "That isn't a picture or a video I can open."),
+        };
+        let Ok(spec) = registry::spec_for(kind, c.library) else {
+            return;
+        };
+        let mut n = c.graph.new_node(&spec);
+        n.pos = [
+            snap(at.x - NODE_W * 0.5, self.snap),
+            snap(at.y - HEADER_H * 0.5, self.snap),
+        ];
+        if let Some(p) = n
+            .params
+            .iter_mut()
+            .find(|p| p.def.name == registry::FILE_PARAM)
+        {
+            p.value = ParamValue::Text(path.display().to_string());
+        }
+        if let Some(stem) = path.file_stem() {
+            n.label = truncate(&stem.to_string_lossy(), 20);
+        }
+        let id = n.id;
+        match c.history.exec(c.graph, Command::AddNode(Box::new(n))) {
+            Ok(()) => {
+                self.selected = BTreeSet::from([id]);
+                self.say(
+                    ui,
+                    "Added. Wire it into an effect or straight into Program Out.",
+                );
+            }
+            Err(e) => self.say(ui, e.to_string()),
         }
     }
 
