@@ -1,7 +1,7 @@
 //! The main window, one workspace (DIRECTION_UPDATE_v2.md, UI): toolbar on
-//! top, Media | Looks on the left, the viewer in the middle, the Inspector on
-//! the right, the node graph below and the signal strip at the very bottom.
-//! Panel sizes and toggles are remembered between sessions.
+//! top, signal strip at the bottom, and between them dockable panels (see
+//! `dock.rs`): Viewer, Node Graph, Inspector, Sources, Media, Looks,
+//! Analysis, Meters. Drag a tab to move a panel; the layout is remembered.
 
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::Instant;
@@ -11,6 +11,7 @@ use egui::{Color32, CornerRadius, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 
 use crate::analysis_thread::{self, Command, WaveformSnapshot};
 use crate::debug_panel;
+use crate::dock::{self, Layout, Pane};
 use crate::graph_view::ViewerMode;
 use crate::offline::{self, OfflineReport};
 use crate::rhythm_panel::RhythmView;
@@ -20,22 +21,14 @@ use crate::theme;
 const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 10);
 const PANEL_BG: Color32 = theme::PANEL;
 
-/// Left panel tabs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-enum LeftTab {
-    Media,
-    Looks,
-}
-
 /// Layout and view settings remembered between sessions.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 struct Prefs {
-    show_left: bool,
-    show_right: bool,
-    show_graph: bool,
+    /// The panel layout (None = the Build layout).
+    dock: Option<egui_tiles::Tree<Pane>>,
+    layout: Layout,
     show_strip: bool,
-    left_tab: LeftTab,
     viewer: ViewerMode,
     pip: bool,
     snap: bool,
@@ -51,11 +44,9 @@ struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            show_left: true,
-            show_right: true,
-            show_graph: true,
+            dock: None,
+            layout: Layout::Build,
             show_strip: true,
-            left_tab: LeftTab::Media,
             viewer: ViewerMode::Program,
             pip: true,
             snap: true,
@@ -82,7 +73,6 @@ pub struct VisualEngineApp {
     /// Offline analysis in progress: (file name, result channel).
     offline_job: Option<(String, Receiver<anyhow::Result<OfflineReport>>)>,
     offline_result: Option<Result<OfflineReport, String>>,
-    show_meters: bool,
     /// For the hops-per-second readout: (hop index, when) of the last sample.
     hop_rate_mark: (u64, Instant),
     hops_per_sec: f32,
@@ -98,12 +88,13 @@ pub struct VisualEngineApp {
     fullscreen: bool,
     show_waveform: bool,
     show_fps: bool,
-    /// Node graph panel visible (Tab).
-    show_graph: bool,
-    show_left: bool,
-    show_right: bool,
+    /// The dockable panels.
+    dock: egui_tiles::Tree<Pane>,
+    /// The ready-made layout last picked (shown in the toolbar).
+    layout: Layout,
     show_strip: bool,
-    left_tab: LeftTab,
+    /// The graph panel is on screen this frame.
+    graph_shown: bool,
     sync: crate::av_sync::AvSync,
 }
 
@@ -139,7 +130,6 @@ impl VisualEngineApp {
             rhythm_view: RhythmView::default(),
             offline_job: None,
             offline_result: None,
-            show_meters: false,
             hop_rate_mark: (0, Instant::now()),
             hops_per_sec: 0.0,
             loading: None,
@@ -153,11 +143,13 @@ impl VisualEngineApp {
             fullscreen: false,
             show_waveform: false,
             show_fps: prefs.show_fps,
-            show_graph: prefs.show_graph,
-            show_left: prefs.show_left,
-            show_right: prefs.show_right,
+            dock: prefs
+                .dock
+                .filter(dock::is_complete)
+                .unwrap_or_else(|| dock::build(prefs.layout)),
+            layout: prefs.layout,
             show_strip: prefs.show_strip,
-            left_tab: prefs.left_tab,
+            graph_shown: true,
             sync: crate::av_sync::AvSync::new(prefs.av_offset_ms),
         };
         app.scene.ws.viewer = prefs.viewer;
@@ -259,50 +251,57 @@ impl VisualEngineApp {
         }
     }
 
-    fn left_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.left_tab, LeftTab::Media, "Media");
-            ui.selectable_value(&mut self.left_tab, LeftTab::Looks, "Looks");
-        });
-        ui.separator();
-        match self.left_tab {
-            LeftTab::Media => {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| self.side_panel(ui));
-            }
-            LeftTab::Looks => {
-                ui.add_space(24.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        RichText::new("No Looks yet.")
-                            .size(16.0)
-                            .color(Color32::from_gray(200)),
-                    );
-                    ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(
-                            "Looks are hand-made signature visuals you can switch, mutate and \
-                             breed. They arrive in M6. Until then, build your own in the graph.",
-                        )
-                        .weak(),
-                    );
-                });
-            }
-        }
+    /// Is a panel shown?
+    fn shown(&self, pane: Pane) -> bool {
+        dock::is_shown(&self.dock, pane)
     }
 
-    fn side_panel(&mut self, ui: &mut egui::Ui) {
-        // ---------------- Media pool ----------------
-        if self.scene.graph_mode {
-            ui.label(RichText::new("PICTURES & VIDEOS").strong());
-            ui.separator();
-            self.scene.ws.pool_ui(ui);
-            ui.add_space(10.0);
+    fn set_shown(&mut self, pane: Pane, on: bool) {
+        dock::set_shown(&mut self.dock, pane, on);
+    }
+
+    fn media_panel(&mut self, ui: &mut egui::Ui) {
+        if !self.scene.graph_mode {
+            ui.label(
+                RichText::new("Switch the Inspector to Node graph to use pictures and videos.")
+                    .weak(),
+            );
+            return;
         }
-        // ---------------- Song file ----------------
-        ui.label(RichText::new("SONG FILE").strong());
+        self.scene.ws.pool_ui(ui);
+    }
+
+    fn looks_panel(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(24.0);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new("No Looks yet.")
+                    .size(16.0)
+                    .color(Color32::from_gray(200)),
+            );
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "Looks are hand-made signature visuals you can switch, mutate and \
+                     breed. They arrive in M6. Until then, build your own in the graph, or \
+                     right-click it → Add compositing demo.",
+                )
+                .weak(),
+            );
+        });
+    }
+
+    fn heading(ui: &mut egui::Ui, text: &str) {
+        ui.add_space(4.0);
+        ui.label(RichText::new(text).strong().size(12.0).color(theme::ACCENT));
         ui.separator();
+    }
+
+    /// Where the sound comes from (song, live input, computer audio), the
+    /// cameras, and sound / picture sync.
+    fn sources_panel(&mut self, ui: &mut egui::Ui) {
+        // ---------------- Song file ----------------
+        Self::heading(ui, "SONG");
         ui.horizontal(|ui| {
             let busy = self.loading.is_some();
             if ui
@@ -387,7 +386,7 @@ impl VisualEngineApp {
             if ui
                 .button("🔊 Sound & picture sync…")
                 .on_hover_text(
-                    "If the visuals feel early or late (Bluetooth speakers, a projector),                      set an offset here, or let the tap test find it.",
+                    "If the visuals feel early or late (Bluetooth speakers, a projector), set an offset here, or let the tap test find it.",
                 )
                 .clicked()
             {
@@ -402,11 +401,10 @@ impl VisualEngineApp {
             }
         });
 
-        ui.add_space(18.0);
+        ui.add_space(14.0);
 
         // ---------------- Live input ----------------
-        ui.label(RichText::new("LIVE INPUT").strong());
-        ui.separator();
+        Self::heading(ui, "LIVE INPUT");
         let selected_text = self
             .selected_input
             .and_then(|i| self.input_devices.get(i))
@@ -432,7 +430,7 @@ impl VisualEngineApp {
         });
 
         let live_active = matches!(self.engine.source(), Source::Live(_));
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let can_start = self.selected_input.is_some();
             if ui
                 .add_enabled(can_start, egui::Button::new("🎤 Start input"))
@@ -462,9 +460,7 @@ impl VisualEngineApp {
                 self.error = None;
                 if let Err(e) = self.engine.start_live(&device) {
                     log::error!("could not start {}: {e:#}", device.name);
-                    self.error = Some(format!(
-                        "Could not capture computer audio: {e:#}. On a Mac this needs macOS 14.2 or newer and the \"System Audio Recording\" permission."
-                    ));
+                    self.error = Some(format!("Could not capture computer audio: {e:#}."));
                 }
             }
             if ui
@@ -486,10 +482,26 @@ impl VisualEngineApp {
             );
         }
 
-        ui.add_space(18.0);
-        ui.label(RichText::new("ANALYSIS").strong());
-        ui.separator();
-        ui.checkbox(&mut self.show_meters, "Show signal meters (M)");
+        if let Some(err) = &self.error {
+            ui.add_space(8.0);
+            ui.label(RichText::new(err).color(ERROR_COLOR));
+        }
+
+        // ---------------- Cameras ----------------
+        if self.scene.graph_mode {
+            ui.add_space(14.0);
+            Self::heading(ui, "CAMERAS");
+            self.scene.ws.cameras_ui(ui);
+        }
+    }
+
+    /// Tempo help, the events log and offline analysis.
+    fn analysis_panel(&mut self, ui: &mut egui::Ui) {
+        Self::heading(ui, "TEMPO AND VIEW");
+        let mut meters = self.shown(Pane::Meters);
+        if ui.checkbox(&mut meters, "Show signal meters (M)").changed() {
+            self.set_shown(Pane::Meters, meters);
+        }
         ui.checkbox(&mut self.show_waveform, "Waveform overlay");
         ui.horizontal(|ui| {
             if ui
@@ -563,8 +575,7 @@ impl VisualEngineApp {
         }
 
         ui.add_space(14.0);
-        ui.label(RichText::new("EVENTS").strong());
-        ui.separator();
+        Self::heading(ui, "EVENTS");
         egui::ScrollArea::vertical()
             .max_height(170.0)
             .auto_shrink([false, true])
@@ -581,14 +592,9 @@ impl VisualEngineApp {
                 }
             });
 
-        if let Some(err) = &self.error {
-            ui.add_space(12.0);
-            ui.label(RichText::new(err).color(ERROR_COLOR));
-        }
-
         // ---------------- Footer ----------------
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-            ui.add_space(6.0);
+        ui.add_space(14.0);
+        ui.vertical(|ui| {
             ui.label(
                 RichText::new(format!("GPU: {}", self.gpu_info))
                     .small()
@@ -616,7 +622,7 @@ impl VisualEngineApp {
 
         let live = matches!(self.engine.source(), Source::Live(_));
         let signal_frame = self.sync.frame(self.signals.latest(), live);
-        self.scene.graph_visible = self.show_graph && !self.fullscreen;
+        self.scene.graph_visible = self.graph_shown && !self.fullscreen;
         self.scene.paint(ui, frame, rect, &signal_frame);
         self.sync.draw(&painter, rect);
         if self.scene.graph_mode && !self.fullscreen {
@@ -664,7 +670,7 @@ impl VisualEngineApp {
             .perf
             .draw_overlay(&painter, rect, !self.fullscreen);
         if !has_source && !self.fullscreen {
-            let msg = "No audio source. Open a song or start a live input on the left.";
+            let msg = "No sound yet. Open a song or start an input in the Sources panel.";
             let pos = rect.center_bottom() - Vec2::new(0.0, 40.0);
             let galley =
                 painter.layout_no_wrap(msg.into(), egui::FontId::proportional(15.0), label_color);
@@ -772,16 +778,8 @@ impl VisualEngineApp {
                     .color(theme::ACCENT),
             );
             ui.add_space(14.0);
-            ui.toggle_value(&mut self.show_left, "Media")
-                .on_hover_text("Songs, live input, analysis (left panel)");
-            ui.toggle_value(&mut self.show_right, "Inspector")
-                .on_hover_text("Settings of the selected node (right panel)");
-            if self.scene.graph_mode {
-                ui.toggle_value(&mut self.show_graph, "Graph")
-                    .on_hover_text("The node graph (Tab)");
-            }
-            ui.toggle_value(&mut self.show_strip, "Signals")
-                .on_hover_text("The signal strip along the bottom");
+            self.layout_menu(ui);
+            self.panels_menu(ui);
             ui.separator();
             if self.scene.graph_mode {
                 let ws = &mut self.scene.ws;
@@ -800,7 +798,7 @@ impl VisualEngineApp {
                 ui.toggle_value(&mut ws.editor.thumbnails, "Thumbnails")
                     .on_hover_text("Live pictures inside nodes");
                 ui.toggle_value(&mut ws.editor.show_cost, "Cost").on_hover_text(
-                    "GPU time each node takes, in milliseconds (needs a GPU that can                      measure it). At 60 fps the whole frame has 16.7 ms.",
+                    "GPU time each node takes, in milliseconds (needs a GPU that can measure it). At 60 fps the whole frame has 16.7 ms.",
                 );
                 if ui
                     .add_enabled(ws.history.can_undo(), egui::Button::new("↶"))
@@ -823,7 +821,7 @@ impl VisualEngineApp {
                     .on_hover_text("Graph shortcuts. H shows the performance keys.")
                     .clicked()
                 {
-                    self.show_graph = true;
+                    self.set_shown(Pane::Graph, true);
                     self.scene.ws.editor.show_help = !self.scene.ws.editor.show_help;
                 }
                 let gpu = match &self.scene.ws.gpu {
@@ -840,10 +838,61 @@ impl VisualEngineApp {
                     .weak(),
                 )
                 .on_hover_text(
-                    "Frames per second and time per frame. GPU = time the graphics card                      spent on the graph's nodes (each node shows its own share).",
+                    "Frames per second and time per frame. GPU = time the graphics card spent on the graph's nodes (each node shows its own share).",
                 );
             });
         });
+    }
+
+    /// Pick a ready-made layout.
+    fn layout_menu(&mut self, ui: &mut egui::Ui) {
+        let text = RichText::new(format!("Layout: {}", self.layout.name())).strong();
+        ui.menu_button(text, |ui| {
+            ui.label(
+                RichText::new("Drag any panel's tab to move it, split it or stack it.")
+                    .small()
+                    .weak(),
+            );
+            for l in Layout::ALL {
+                if ui.button(l.name()).on_hover_text(l.hint()).clicked() {
+                    self.layout = l;
+                    self.dock = dock::build(l);
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui
+                .button(format!("Reset {}", self.layout.name()))
+                .on_hover_text("Put every panel back where this layout has it")
+                .clicked()
+            {
+                self.dock = dock::build(self.layout);
+                ui.close();
+            }
+        })
+        .response
+        .on_hover_text("Ready-made panel layouts");
+    }
+
+    /// Show or hide each panel.
+    fn panels_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button(RichText::new("Panels").strong(), |ui| {
+            for pane in Pane::ALL {
+                let mut on = self.shown(pane);
+                if ui
+                    .checkbox(&mut on, pane.title())
+                    .on_hover_text(pane.hint())
+                    .changed()
+                {
+                    self.set_shown(pane, on);
+                }
+            }
+            ui.separator();
+            ui.checkbox(&mut self.show_strip, "Signal strip")
+                .on_hover_text("Levels, hits, tempo and beat along the bottom");
+        })
+        .response
+        .on_hover_text("Show or hide panels");
     }
 
     /// The thin strip along the bottom: band levels, hits, tempo, phase.
@@ -1035,11 +1084,9 @@ impl eframe::App for VisualEngineApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         let ws = &self.scene.ws;
         let prefs = Prefs {
-            show_left: self.show_left,
-            show_right: self.show_right,
-            show_graph: self.show_graph,
+            dock: Some(self.dock.clone()),
+            layout: self.layout,
             show_strip: self.show_strip,
-            left_tab: self.left_tab,
             viewer: ws.viewer,
             pip: ws.pip,
             snap: ws.editor.snap,
@@ -1099,11 +1146,12 @@ impl eframe::App for VisualEngineApp {
                 };
             }
             if search {
-                self.show_graph = true;
+                self.set_shown(Pane::Graph, true);
                 self.scene.ws.editor.open_search(ui.ctx());
             }
             if tab {
-                self.show_graph = !self.show_graph;
+                let on = self.shown(Pane::Graph);
+                self.set_shown(Pane::Graph, !on);
             }
         }
         self.scene.handle_keys(ui.ctx());
@@ -1122,10 +1170,11 @@ impl eframe::App for VisualEngineApp {
             match media::kind_of(&path) {
                 Some(media::Kind::Audio) => self.load_song(path),
                 Some(_) => {
+                    let graph_on = self.shown(Pane::Graph);
                     let ws = &mut self.scene.ws;
                     ws.pool.add(&path);
                     if self.scene.graph_mode
-                        && self.show_graph
+                        && graph_on
                         && let Some(p) = pointer.filter(|p| ws.editor.last_rect.contains(*p))
                     {
                         ws.editor
@@ -1163,7 +1212,8 @@ impl eframe::App for VisualEngineApp {
             self.toggle_fullscreen(ui.ctx());
         }
         if m && !typing {
-            self.show_meters = !self.show_meters;
+            let on = self.shown(Pane::Meters);
+            self.set_shown(Pane::Meters, !on);
         }
         if f && !typing {
             self.show_fps = !self.show_fps;
@@ -1207,61 +1257,106 @@ impl eframe::App for VisualEngineApp {
                 .show(ui, |ui| self.signal_strip(ui));
         }
 
-        if self.show_meters {
-            self.update_hop_rate(sf.hop_index);
-            let rate = self.hops_per_sec;
-            let view = &self.rhythm_view;
-            egui::Panel::bottom("signals")
-                .resizable(true)
-                .default_size(440.0)
-                .size_range(340.0..=700.0)
-                .frame(egui::Frame::NONE.fill(PANEL_BG))
-                .show(ui, |ui| debug_panel::show(ui, &sf, rate, view));
-        }
+        self.graph_shown = self.scene.graph_mode && self.shown(Pane::Graph);
+        let mut tree = std::mem::replace(
+            &mut self.dock,
+            egui_tiles::Tree::empty(egui::Id::unique("swap")),
+        );
+        egui::CentralPanel::no_frame().show(ui, |ui| {
+            let mut panes = Panes {
+                app: self,
+                frame,
+                signals: &sf,
+            };
+            tree.ui(&mut panes, ui);
+        });
+        self.dock = tree;
+    }
+}
 
-        if self.scene.graph_mode && self.show_graph {
-            egui::Panel::bottom("graph")
-                .resizable(true)
-                .default_size(320.0)
-                .size_range(160.0..=900.0)
-                .frame(egui::Frame::NONE.fill(crate::graph_editor::CANVAS_BG))
-                .show(ui, |ui| self.scene.graph_panel(ui));
-        }
+/// Draws each dock panel.
+struct Panes<'a> {
+    app: &'a mut VisualEngineApp,
+    frame: &'a eframe::Frame,
+    signals: &'a signals::SignalFrame,
+}
 
-        if self.show_left {
-            egui::Panel::left("sources")
-                .resizable(true)
-                .default_size(300.0)
-                .size_range(240.0..=520.0)
-                .frame(
-                    egui::Frame::side_top_panel(ui.style())
-                        .fill(PANEL_BG)
-                        .inner_margin(10.0),
-                )
-                .show(ui, |ui| self.left_panel(ui));
-        }
+impl egui_tiles::Behavior<Pane> for Panes<'_> {
+    fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
+        pane.title().into()
+    }
 
-        if !self.show_right {
-            egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
-            return;
+    fn pane_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        _tile: egui_tiles::TileId,
+        pane: &mut Pane,
+    ) -> egui_tiles::UiResponse {
+        let app = &mut *self.app;
+        let padded = |ui: &mut egui::Ui, fill: Color32, add: &mut dyn FnMut(&mut egui::Ui)| {
+            egui::Frame::NONE
+                .fill(fill)
+                .inner_margin(10.0)
+                .show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| add(ui));
+                });
+        };
+        match pane {
+            Pane::Viewer => app.preview(ui, self.frame),
+            Pane::Graph => {
+                if app.scene.graph_mode {
+                    egui::Frame::NONE
+                        .fill(crate::graph_editor::CANVAS_BG)
+                        .show(ui, |ui| {
+                            ui.set_min_size(ui.available_size());
+                            app.scene.graph_panel(ui);
+                        });
+                } else {
+                    padded(ui, PANEL_BG, &mut |ui| {
+                        ui.label(
+                            RichText::new(
+                                "Classic scenes are on. Switch the Inspector to Node graph \
+                                 to build with nodes.",
+                            )
+                            .weak(),
+                        );
+                    });
+                }
+            }
+            Pane::Inspector => padded(ui, PANEL_BG, &mut |ui| app.scene.controls(ui)),
+            Pane::Sources => padded(ui, PANEL_BG, &mut |ui| app.sources_panel(ui)),
+            Pane::Media => padded(ui, PANEL_BG, &mut |ui| app.media_panel(ui)),
+            Pane::Looks => padded(ui, PANEL_BG, &mut |ui| app.looks_panel(ui)),
+            Pane::Analysis => padded(ui, PANEL_BG, &mut |ui| app.analysis_panel(ui)),
+            Pane::Meters => {
+                app.update_hop_rate(self.signals.hop_index);
+                let rate = app.hops_per_sec;
+                let sf = self.signals;
+                egui::Frame::NONE.fill(PANEL_BG).show(ui, |ui| {
+                    ui.set_min_size(ui.available_size());
+                    debug_panel::show(ui, sf, rate, &app.rhythm_view);
+                });
+            }
         }
-        egui::Panel::right("scene")
-            .resizable(true)
-            .default_size(340.0)
-            .size_range(300.0..=520.0)
-            .frame(
-                egui::Frame::side_top_panel(ui.style())
-                    .fill(PANEL_BG)
-                    .inner_margin(12.0),
-            )
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| self.scene.controls(ui));
-                ui.add_space(4.0);
-            });
+        egui_tiles::UiResponse::None
+    }
 
-        egui::CentralPanel::no_frame().show(ui, |ui| self.preview(ui, frame));
+    fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
+        theme::DEEP
+    }
+
+    fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        egui_tiles::SimplificationOptions {
+            all_panes_must_have_tabs: true,
+            ..Default::default()
+        }
+    }
+
+    fn gap_width(&self, _style: &egui::Style) -> f32 {
+        3.0
     }
 }
 

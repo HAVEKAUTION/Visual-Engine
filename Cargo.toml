@@ -29,6 +29,7 @@ realfft = "3.5"
 triple_buffer = "9"
 eframe = { version = "0.37", features = ["persistence"] }
 egui = "0.37"
+egui_tiles = "0.18"
 rfd = "0.18"
 wgpu = "30"
 naga = { version = "30", features = ["wgsl-in"] }

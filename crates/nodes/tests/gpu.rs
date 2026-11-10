@@ -840,11 +840,12 @@ fn compositing_demo_builds_and_draws() {
         .iter()
         .find(|n| n.kind == registry::LAYER_MIXER)
         .unwrap();
-    for i in [2, 3] {
+    for i in 2..=6 {
         assert_eq!(
             mix.param(&registry::layer_param("mute", i))
                 .map(|p| &p.value),
-            Some(&graph::ParamValue::Bool(true))
+            Some(&graph::ParamValue::Bool(true)),
+            "layer {i}"
         );
     }
     let Some((px, _, _)) = run(&g, out, 30) else {
@@ -858,5 +859,5 @@ fn compositing_demo_builds_and_draws() {
     };
     let (g, _) = nodes::demo::compositing(&lib, &media).unwrap();
     assert!(g.nodes().iter().any(|n| n.kind == registry::CAMERA));
-    assert_eq!(g.frames().len(), 3);
+    assert_eq!(g.frames().len(), 6);
 }

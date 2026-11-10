@@ -119,9 +119,9 @@ it does.
 
 ```
 ┌──────────────┬──────────────────────────────────┬──────────────┐
-│ MEDIA        │             VIEWER               │  INSPECTOR   │
-│ pictures,    │  what the audience sees, or the  │  settings of │
-│ videos,      │  selected node, wipe, PiP        │  the node    │
+│ SOURCES |    │             VIEWER               │  INSPECTOR   │
+│ MEDIA | ...  │  what the audience sees, or the  │  settings of │
+│ (tabs)       │  selected node, wipe, PiP        │  the node    │
 │ cameras;     │                                  │  you clicked │
 │ song & input │                                  │              │
 ├──────────────┴──────────────────────────────────┴──────────────┤
@@ -131,10 +131,12 @@ it does.
 └────────────────────────────────────────────────────────────────┘
 ```
 
-- The buttons at the top left (**Media, Inspector, Graph, Signals**) show and hide
-  each panel. If one is missing, click its button.
-- **Sound source:** in the Media panel on the left, scroll down past the pictures to
-  **Open song…**, the live inputs, and **Computer audio**.
+- Every panel is a tab you can drag: drop it on another panel to join its tabs, or
+  on an edge to split. Drag the gaps to resize. Your arrangement is remembered.
+- **Layout** (top left) switches between Build, Perform and Stream, or resets.
+  **Panels** shows or hides any panel. If one is missing, tick it there.
+- **Sound source:** the **Sources** tab on the left: **Open song…**, the live
+  inputs, **Computer audio**, and your cameras.
 - **Settings for a node:** click the node in the graph. Its settings appear in the
   **Inspector** on the right, with a short "How to use" note and buttons to add an
   effect, a layer or a mask. With nothing selected, the Inspector shows getting-started
@@ -156,8 +158,8 @@ Done:
 
 Next, roughly in order:
 
-1. **UI pass.** Dockable panels you can drag, float and tab (like Adobe apps), saved
-   layouts, user themes, a clearer sources panel, and bolder Resolve-style looks.
+1. **UI pass, part 2.** User themes and bolder Resolve-style looks. (Part 1, dockable
+   panels, saved layouts and the Sources panel, is done.)
 2. **Looks and the full node library.** Signature looks you can mutate and breed,
    ready-made node layouts in the right-click menu, more original effects (datamosh,
    liquify, a symmetry engine), text, depth, and a free pack of starter pictures.

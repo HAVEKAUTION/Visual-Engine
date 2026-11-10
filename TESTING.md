@@ -316,6 +316,27 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M3b part 1 – Dockable panels, Sources panel, layouts
+
+- [ ] The toolbar shows **Layout: Build** and **Panels** at the top left.
+- [ ] The left side has tabs **Sources, Media, Looks, Analysis**. Clicking a tab
+      switches what that panel shows.
+- [ ] **Sources** has Open song…, the live input list with Start input / Computer audio
+      / Stop, and your cameras. Starting an input makes the signal strip move.
+- [ ] Drag the **Inspector** tab onto the left panel: it becomes another tab there.
+      Drag it to the right edge of the Viewer: it splits beside it.
+- [ ] Drag the line between two panels: they resize.
+- [ ] Close and reopen the app: your arrangement is the same.
+- [ ] **Layout → Perform**: a big viewer, side tabs, small graph below.
+      **Layout → Stream**: nearly all viewer. **Layout → Build**: back to normal.
+- [ ] **Layout → Reset Build** puts back the ready-made arrangement.
+- [ ] **Panels**: untick Node Graph and it hides; tick it and it comes back. Same with
+      Meters (or press M) and the Signal strip.
+- [ ] Import 2 videos and 3 pictures in Media, then right-click the graph →
+      **Add compositing demo**. All of them show in the viewer, layered. The webcam
+      layer (layer 7 in the Layers node) is muted until you unmute it.
+- Not yet: floating windows outside the main window; themes (part 2).
+
 ## v2 M5 part 3 – Viewer handles, Corner Pin, demo (GATE for M5)
 
 Run: `cargo run --release -p app` (close any running copy first)

@@ -3,6 +3,7 @@
 mod analysis_thread;
 mod av_sync;
 mod debug_panel;
+mod dock;
 mod graph_editor;
 mod graph_view;
 mod handles;

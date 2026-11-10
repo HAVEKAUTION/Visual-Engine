@@ -7,13 +7,13 @@ use nodes::registry::{self, Category};
 pub const GETTING_STARTED: &[(&str, &str)] = &[
     (
         "1. Pick the sound",
-        "Left panel (Media), scroll down: Open song…, a live input, or Computer audio for \
-         whatever your PC is playing.",
+        "Sources panel (top left): Open song…, a live input, or Computer audio for whatever \
+         your PC is playing.",
     ),
     (
         "2. Add a picture",
-        "Drag a picture, video or camera from the Media panel into the graph below. Or \
-         right-click the graph → Sources.",
+        "Import pictures and videos in the Media panel, then drag one into the graph. \
+         Cameras are in the Sources panel. Or right-click the graph → Sources.",
     ),
     (
         "3. Show it",
@@ -90,10 +90,10 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
              circle = a ring, or a shape intersected with motion."
         }
         _ if shader == "fx_transform.wgsl" => {
-            "Drag the handles in the viewer: the middle moves the picture, a corner scales              and turns it (hold Shift to only scale). Kick punch makes it jump on every kick;              Spin speed turns it with the music."
+            "Drag the handles in the viewer: the middle moves the picture, a corner scales and turns it (hold Shift to only scale). Kick punch makes it jump on every kick; Spin speed turns it with the music."
         }
         _ if shader == "fx_corner_pin.wgsl" => {
-            "Drag the four corners in the viewer to pin the picture onto anything: a screen              in a photo, a wall, a tilted card. The middle handle moves all four. Outside the              corners is see-through, so put it on a layer (+ Layer on what's behind)."
+            "Drag the four corners in the viewer to pin the picture onto anything: a screen in a photo, a wall, a tilted card. The middle handle moves all four. Outside the corners is see-through, so put it on a layer (+ Layer on what's behind)."
         }
         _ if shader == "fx_merge.wgsl" => {
             "Background below, Foreground on top, blended with the mode. For more than two \

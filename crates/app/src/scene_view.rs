@@ -568,18 +568,6 @@ impl SceneView {
 
     /// The scene panel.
     pub fn controls(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new(if self.graph_mode {
-                "INSPECTOR"
-            } else {
-                "SCENE"
-            })
-            .size(11.0)
-            .strong()
-            .color(crate::theme::TEXT_WEAK),
-        );
-        ui.separator();
         if self.renderer.is_none() {
             ui.label(RichText::new("No GPU renderer available.").color(ERROR_COLOR));
             return;

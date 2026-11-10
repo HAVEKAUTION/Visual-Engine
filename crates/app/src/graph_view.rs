@@ -253,6 +253,14 @@ impl Workspace {
     }
 
     /// The Media pool panel.
+    /// Cameras, for the Sources panel.
+    pub fn cameras_ui(&mut self, ui: &mut egui::Ui) {
+        if let Some(PoolAction::AddToGraph(what)) = self.pool.cameras_panel(ui) {
+            let at = self.editor.last_rect.center();
+            self.editor.pending_media.push((what, at));
+        }
+    }
+
     pub fn pool_ui(&mut self, ui: &mut egui::Ui) {
         if let Some(PoolAction::AddToGraph(what)) = self.pool.ui(ui) {
             let at = self.editor.last_rect.center();
@@ -398,16 +406,18 @@ impl Workspace {
             self.history.seal();
         }
         let viewed = self.selected_picture().or_else(|| self.viewed());
-        let first = |kind: media::Kind| {
+        let all = |kind: media::Kind, n: usize| {
             self.pool
                 .items
                 .iter()
-                .find(|p| media::kind_of(p) == Some(kind))
+                .filter(|p| media::kind_of(p) == Some(kind) && p.exists())
+                .take(n)
                 .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
         };
         let demo_media = nodes::demo::DemoMedia {
-            video: first(media::Kind::Video),
-            photo: first(media::Kind::Image),
+            videos: all(media::Kind::Video, 2),
+            photos: all(media::Kind::Image, 3),
             camera: match &self.pool.cameras {
                 Some(Ok(list)) => list.first().map(|c| c.name.clone()),
                 _ => None,

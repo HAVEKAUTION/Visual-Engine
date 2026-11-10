@@ -3242,18 +3242,12 @@ impl Editor {
                             self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
                         }
                         let m = &c.demo_media;
-                        let missing: Vec<&str> =
-                            [(m.video.is_none(), "video"), (m.photo.is_none(), "picture")]
-                                .iter()
-                                .filter(|(gone, _)| *gone)
-                                .map(|(_, what)| *what)
-                                .collect();
-                        if !missing.is_empty() {
+                        let used = m.videos.len().min(2) + m.photos.len().min(3);
+                        if used < 5 {
                             self.say(
                                 ui,
                                 format!(
-                                    "Demo added. Your Media panel has no {}, so that layer is                                      muted: choose a file on its node, then unmute the layer.",
-                                    missing.join(" or ")
+                                    "Demo added with {used} of your files. It can use 2 videos and 3 pictures: import more in the Media panel, choose a file on a muted layer's node and unmute it in Layers."
                                 ),
                             );
                         }
@@ -3567,7 +3561,7 @@ fn add_menu(
     if ui
         .button("Add compositing demo")
         .on_hover_text(
-            "A scene, a video in Hard Light, a photo in a pulsing star and your webcam,              layered. Uses the first video, picture and camera in your Media panel.",
+            "Your videos and pictures layered over a scene: blend modes, a pulsing star, a tilted card, scrolling bands. Uses up to 2 videos and 3 pictures from the Media panel, and your webcam (muted to start).",
         )
         .clicked()
     {

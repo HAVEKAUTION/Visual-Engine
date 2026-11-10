@@ -19,6 +19,7 @@ env_logger.workspace = true
 triple_buffer.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui_tiles.workspace = true
 rfd.workspace = true
 render.workspace = true
 scenes.workspace = true

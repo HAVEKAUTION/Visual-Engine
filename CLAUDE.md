@@ -169,9 +169,9 @@ default **off**.
 
 **Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`** (plus the
 "v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
-built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. Next up: **the M3b UI pass** (themes, docking, a clear
-Sources panel, bolder look), then M6
-(BUILD_STEPS_v2 Step 4). Then the M3b UI pass (themes, docking). No Twitch.
+built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. M3b part 1 (docking,
+layouts, Sources panel) done. Next up: **M3b part 2** (RON themes with live reload,
+bolder look, clearer tabs), then M6 (BUILD_STEPS_v2 Step 4). No Twitch.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.

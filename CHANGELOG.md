@@ -2,6 +2,19 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M3b part 1: dockable panels, Sources panel, layouts
+- **Dockable workspace.** Every panel (Viewer, Node Graph, Inspector, Sources, Media,
+  Looks, Analysis, Meters) is a tab. Drag a tab to move it, drop it on the edge of
+  another panel to split, drag the gaps to resize. Your arrangement is remembered.
+- **Layout menu** (top left): Build, Perform, Stream, and Reset to undo your changes.
+- **Panels menu:** a tick box for every panel and the signal strip.
+- **Sources panel:** the song, live input, computer audio and cameras are in one
+  place now (they used to be at the bottom of the Media panel).
+- **Compositing demo uses more of your media:** up to 2 videos and 3 pictures (a
+  video fading in and out, a picture in a pulsing star, one on a tilted card, one in
+  scrolling bands). The webcam layer is muted to start.
+- Keys: Tab shows/hides the graph, M the meters (both also in the Panels menu).
+
 ## 2026-11-10 — v2 M5 part 3: viewer handles, Corner Pin, demo (M5 done)
 - **Fix: Motion Mask on a camera.** "Mask this node → Motion Mask" on a camera (or any
   source) left the Motion Mask with no picture to watch, so the whole camera went

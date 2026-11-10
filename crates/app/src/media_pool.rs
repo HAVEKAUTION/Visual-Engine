@@ -123,6 +123,13 @@ impl MediaPool {
         }
     }
 
+    /// The cameras list (shown in the Sources panel): drag one into the graph.
+    pub fn cameras_panel(&mut self, ui: &mut egui::Ui) -> Option<PoolAction> {
+        let mut action = None;
+        self.cameras_ui(ui, &mut action);
+        action
+    }
+
     fn cameras_ui(&mut self, ui: &mut egui::Ui, action: &mut Option<PoolAction>) {
         self.poll_cameras();
         if self.cameras.is_none() && self.camera_search.is_none() {
@@ -222,7 +229,6 @@ impl MediaPool {
             self.thumbs.insert(path, t);
         }
         let mut action = None;
-        self.cameras_ui(ui, &mut action);
         ui.horizontal(|ui| {
             if ui
                 .button("➕ Import…")
@@ -254,8 +260,8 @@ impl MediaPool {
             if !ok {
                 ui.label(
                     RichText::new(
-                        "Videos need ffmpeg. Windows: run  winget install Gyan.FFmpeg  in a \
-                         terminal. macOS: brew install ffmpeg. Then restart the app.",
+                        "Videos need ffmpeg. Open a terminal and run  winget install \
+                         Gyan.FFmpeg  then restart the app.",
                     )
                     .small()
                     .color(theme::ERROR),

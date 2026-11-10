@@ -563,7 +563,7 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
         (
             AUDIO_SIGNAL,
             Category::Signal,
-            "Any signal: bass, kick hits, loudness, beat phase, and video motion / brightness /              colour. Wire it into a slider.",
+            "Any signal: bass, kick hits, loudness, beat phase, and video motion / brightness / colour. Wire it into a slider.",
         ),
         (
             LFO,
@@ -598,7 +598,7 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
         (
             HOLD,
             Category::Signal,
-            "When Start fires, goes to 1 and stays there until Stop fires or the length runs              out. \"On the drop, bend until the next hi-hat.\"",
+            "When Start fires, goes to 1 and stays there until Stop fires or the length runs out. \"On the drop, bend until the next hi-hat.\"",
         ),
         (
             SAMPLE_HOLD,
@@ -633,12 +633,12 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
         (
             VIDEO,
             Category::Source,
-            "A video file: loop, ping-pong, lock it to the beat, scrub it with a signal,              jump, stutter or freeze it on triggers.",
+            "A video file: loop, ping-pong, lock it to the beat, scrub it with a signal, jump, stutter or freeze it on triggers.",
         ),
         (
             CAMERA,
             Category::Source,
-            "A live camera (webcam, capture card). Its movement becomes signals too: wave              at it and watch Motion.",
+            "A live camera (webcam, capture card). Its movement becomes signals too: wave at it and watch Motion.",
         ),
         (
             LAYER_MIXER,
