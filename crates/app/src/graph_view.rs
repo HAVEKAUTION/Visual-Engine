@@ -114,7 +114,7 @@ impl Workspace {
             match Graph::from_ron(&text) {
                 Ok(mut g) => {
                     // Nodes saved by an older version get any new plugs and settings.
-                    g.upgrade_nodes(registry::builtin_spec);
+                    g.upgrade_nodes(|k| registry::spec_for(k, library).ok());
                     notice = Some("Welcome back. Your graph from last time is restored.".into());
                     Some(g)
                 }
@@ -565,13 +565,125 @@ impl Workspace {
             };
             ui.label(RichText::new(text).weak());
         }
-        for p in &node.params {
-            self.param_ui(ui, id, p);
-            ui.add_space(4.0);
+        if node.kind == registry::LAYER_MIXER {
+            self.layers_ui(ui, id);
+            if let Some(p) = node.param("linear") {
+                self.param_ui(ui, id, p);
+            }
+        } else {
+            for p in &node.params {
+                self.param_ui(ui, id, p);
+                ui.add_space(4.0);
+            }
         }
         if registry::is_media_kind(&node.kind) {
             self.video_signals_ui(ui, id);
         }
+    }
+
+    /// A Layer Mixer's layers, top first: what's in each, blend mode,
+    /// opacity, solo / mute, and moving them up and down.
+    fn layers_ui(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        use registry::{LAYERS, layer_param, layer_port};
+        let Some(node) = self.graph.node(id).cloned() else {
+            return;
+        };
+        let used: Vec<usize> = (1..=LAYERS)
+            .filter(|i| self.graph.input_link(id, &layer_port(*i)).is_some())
+            .collect();
+        ui.label(RichText::new("LAYERS (top first)").small().strong());
+        if used.is_empty() {
+            ui.label(
+                RichText::new(
+                    "Wire pictures into the Layer plugs. Layer 1 is the bottom; each next \
+                     one goes on top of it, blended with its own mode.",
+                )
+                .small()
+                .weak(),
+            );
+            return;
+        }
+        let flag = |name: &str| {
+            matches!(
+                node.param(name).map(|p| &p.value),
+                Some(ParamValue::Bool(true))
+            )
+        };
+        let any_solo = used.iter().any(|i| flag(&layer_param("solo", *i)));
+        let mut swap: Option<(usize, usize)> = None;
+        let mut toggle: Option<(String, bool)> = None;
+        for (k, &i) in used.iter().enumerate().rev() {
+            let source = self
+                .graph
+                .input_link(id, &layer_port(i))
+                .and_then(|l| self.graph.node(l.from.node))
+                .map(|n| n.label.clone())
+                .unwrap_or_default();
+            let solo = flag(&layer_param("solo", i));
+            let mute = flag(&layer_param("mute", i));
+            let hidden = if any_solo { !solo } else { mute };
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{i}")).small().weak());
+                    let name = RichText::new(source).strong();
+                    ui.label(if hidden {
+                        name.weak().strikethrough()
+                    } else {
+                        name
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add_enabled(k > 0, egui::Button::new("▼").small())
+                            .on_hover_text("Move down (under the layer below)")
+                            .clicked()
+                        {
+                            swap = Some((i, used[k - 1]));
+                        }
+                        if ui
+                            .add_enabled(k + 1 < used.len(), egui::Button::new("▲").small())
+                            .on_hover_text("Move up (over the layer above)")
+                            .clicked()
+                        {
+                            swap = Some((i, used[k + 1]));
+                        }
+                        if ui
+                            .selectable_label(mute, "M")
+                            .on_hover_text("Mute: hide this layer")
+                            .clicked()
+                        {
+                            toggle = Some((layer_param("mute", i), !mute));
+                        }
+                        if ui
+                            .selectable_label(solo, "S")
+                            .on_hover_text("Solo: show only soloed layers")
+                            .clicked()
+                        {
+                            toggle = Some((layer_param("solo", i), !solo));
+                        }
+                    });
+                });
+                for what in ["mode", "opacity"] {
+                    if let Some(p) = node.param(&layer_param(what, i)) {
+                        self.param_ui(ui, id, p);
+                    }
+                }
+            });
+        }
+        if let Some((param, on)) = toggle {
+            let _ = self.history.exec(
+                &mut self.graph,
+                Command::SetParam {
+                    node: id,
+                    param,
+                    value: ParamValue::Bool(on),
+                },
+            );
+        }
+        if let Some((a, b)) = swap {
+            let cmds = nodes::layers::swap_layers(&self.graph, id, a, b);
+            let _ = self.history.exec(&mut self.graph, Command::Batch(cmds));
+        }
+        ui.add_space(4.0);
     }
 
     /// A Camera node's camera, size and rate.

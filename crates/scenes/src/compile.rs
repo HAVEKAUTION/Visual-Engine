@@ -33,7 +33,7 @@ pub fn full_source(user: &str, meta: &SceneMeta) -> String {
     s += &ParamLayout::wgsl_struct(meta);
     // Named readers for an effect's picture inputs: `img_base(uv)`, ...
     for (i, img) in meta.images.iter().enumerate() {
-        let tex = if i == 0 { "image_a" } else { "image_b" };
+        let tex = ["image_a", "image_b", "image_c", "image_d"][i.min(3)];
         s += &format!(
             "fn img_{}(uv: vec2<f32>) -> vec4<f32> {{ return {tex}(uv); }}
 ",

@@ -45,6 +45,37 @@ pub const FILE_PARAM: &str = "file";
 /// The shader inside the Image / Video nodes (not in the scenes library).
 pub const MEDIA_SHADER: &str = "media_fit.wgsl";
 pub const MEDIA_SHADER_SRC: &str = include_str!("../shaders/media_fit.wgsl");
+/// The pass that limits any node to its mask.
+pub const MASK_SHADER: &str = "mask_apply.wgsl";
+/// One layer of a Layer Mixer.
+pub const LAYER_SHADER: &str = "layer_blend.wgsl";
+
+/// Shaders built into the app (not files in the scenes folder).
+pub fn builtin_shader(file: &str) -> Option<&'static str> {
+    match file {
+        MEDIA_SHADER => Some(MEDIA_SHADER_SRC),
+        MASK_SHADER => Some(include_str!("../shaders/mask_apply.wgsl")),
+        LAYER_SHADER => Some(include_str!("../shaders/layer_blend.wgsl")),
+        _ => None,
+    }
+}
+
+pub const LAYER_MIXER: &str = "layer_mixer";
+/// How many layers a Layer Mixer takes.
+pub const LAYERS: usize = 8;
+
+/// A Layer Mixer's plug and settings for layer `i` (1 = bottom).
+pub fn layer_port(i: usize) -> String {
+    format!("layer{i}")
+}
+pub fn layer_param(what: &str, i: usize) -> String {
+    format!("{what}{i}")
+}
+
+/// Which layer a Layer Mixer plug is (`layer3` → 3).
+pub fn layer_index(port: &str) -> Option<usize> {
+    port.strip_prefix("layer")?.parse().ok()
+}
 
 /// Is this an Image, Video or Camera node?
 pub fn is_media_kind(kind: &str) -> bool {
@@ -321,6 +352,47 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                     .collect(),
             )
         }
+        LAYER_MIXER => {
+            let modes = scenes::blend::BLEND_MODES;
+            let mut params = Vec::new();
+            for i in 1..=LAYERS {
+                params.push(pick(
+                    &layer_param("mode", i),
+                    &format!("Layer {i} blend"),
+                    modes,
+                    0,
+                ));
+                params.push(num(
+                    &layer_param("opacity", i),
+                    &format!("Layer {i} opacity"),
+                    0.0,
+                    1.0,
+                    1.0,
+                ));
+                params.push(toggle(
+                    &layer_param("solo", i),
+                    &format!("Layer {i} solo"),
+                    false,
+                ));
+                params.push(toggle(
+                    &layer_param("mute", i),
+                    &format!("Layer {i} mute"),
+                    false,
+                ));
+            }
+            params.push(toggle("linear", "Blend in linear light", false));
+            spec(
+                "Layer Mixer",
+                (1..=LAYERS)
+                    .map(|i| PortDef {
+                        label: format!("Layer {i}"),
+                        ..PortDef::new(&layer_port(i), PortType::Image).optional()
+                    })
+                    .collect(),
+                vec![PortDef::new(IMAGE_OUT, PortType::Image)],
+                params,
+            )
+        }
         HOLD => spec(
             "Hold",
             vec![trig_in("start", "Start"), trig_in("stop", "Stop")],
@@ -556,6 +628,12 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
             CAMERA,
             Category::Source,
             "A live camera (webcam, capture card). Its movement becomes signals too: wave              at it and watch Motion.",
+        ),
+        (
+            LAYER_MIXER,
+            Category::Effect,
+            "Stacks pictures like layers: each one on top of the ones before, with its own \
+             blend mode and opacity. Solo, mute and reorder them in the Inspector.",
         ),
         (PROGRAM_OUT, Category::Output, "The final picture."),
     ];

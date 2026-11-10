@@ -32,6 +32,10 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
   ping-pong / beat-locked / scrub; jump / restart / stutter / freeze), Media pool
   with drag-and-drop and relinking, live cameras (nokhwa), video signals on the bus
   (motion, where, brightness, colour) and a sound & picture sync test.
+- **v2 M5 – compositing**: in progress. Part 1: all 21 Photoshop / W3C blend modes
+  (tested against a reference), a Mask plug that works on every node, and the Layer
+  Mixer (8 layers, solo / mute / reorder). Next: keys and masks, Transform and Corner
+  Pin handles in the viewer, the demo project.
 
 ## Running it
 

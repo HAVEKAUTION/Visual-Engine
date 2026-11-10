@@ -138,6 +138,31 @@ struct Layout {
     thumb: Option<Rect>,
 }
 
+/// The plugs drawn on a node. A Layer Mixer shows its wired layers plus
+/// one free slot, so it grows as you wire it.
+fn shown_inputs(g: &Graph, n: &Node) -> Vec<graph::PortDef> {
+    if n.kind != registry::LAYER_MIXER {
+        return n.inputs.clone();
+    }
+    let mut free_shown = false;
+    let mut out = Vec::new();
+    for p in &n.inputs {
+        let show = match registry::layer_index(&p.name) {
+            Some(_) if g.input_link(n.id, &p.name).is_some() => true,
+            Some(_) if !free_shown => {
+                free_shown = true;
+                true
+            }
+            Some(_) => false,
+            None => true,
+        };
+        if show {
+            out.push(p.clone());
+        }
+    }
+    out
+}
+
 fn layout(g: &Graph, n: &Node, thumbs: bool, k: f32) -> Layout {
     let (nw, hh, rh, th) = (NODE_W * k, HEADER_H * k, ROW_H * k, THUMB_H * k);
     let min = pos2(n.pos[0], n.pos[1]);
@@ -155,7 +180,7 @@ fn layout(g: &Graph, n: &Node, thumbs: bool, k: f32) -> Layout {
             })
             .collect()
     };
-    let inputs = ports(&n.inputs, min.x);
+    let inputs = ports(&shown_inputs(g, n), min.x);
     let outputs = ports(&n.outputs, min.x + nw);
     let first = inputs.len().max(outputs.len());
     let mods: Vec<_> = n
@@ -2520,13 +2545,70 @@ impl Editor {
                 else {
                     return;
                 };
-                let merge_kind = registry::shader_kind("fx_merge.wgsl");
+                // Same input as the node beside it.
+                let same_input: Option<Command> = match (
+                    &first_image,
+                    b.inputs
+                        .iter()
+                        .find(|p| p.ty == PortType::Image)
+                        .and_then(|p| c.graph.input_link(beside, &p.name)),
+                ) {
+                    (Some(input), Some(src)) => Some(Command::Connect(Link::new(
+                        src.from.clone(),
+                        Endpoint::input(new, input),
+                    ))),
+                    _ => None,
+                };
+                // Already a layer of a Layer Mixer: go on top, in its next free slot.
+                let mixer_slot = (!parallel)
+                    .then(|| {
+                        c.graph.links().iter().find_map(|l| match &l.to {
+                            Endpoint::Input { node, port }
+                                if l.from.node == beside
+                                    && registry::layer_index(port).is_some()
+                                    && c.graph
+                                        .node(*node)
+                                        .is_some_and(|n| n.kind == registry::LAYER_MIXER) =>
+                            {
+                                let free = (1..=registry::LAYERS).find(|i| {
+                                    c.graph
+                                        .input_link(*node, &registry::layer_port(*i))
+                                        .is_none()
+                                })?;
+                                Some((*node, free))
+                            }
+                            _ => None,
+                        })
+                    })
+                    .flatten();
+                if let Some((mixer, slot)) = mixer_slot {
+                    cmds.push(Command::Move {
+                        node: new,
+                        pos: [b.pos[0], b.pos[1] + 160.0],
+                    });
+                    cmds.extend(same_input.clone());
+                    cmds.push(Command::Connect(Link::new(
+                        OutputRef::new(new, &out),
+                        Endpoint::input(mixer, &registry::layer_port(slot)),
+                    )));
+                    let _ = c.history.undo(c.graph);
+                    cmds.insert(0, Command::AddNode(Box::new(node)));
+                    if c.history.exec(c.graph, Command::Batch(cmds)).is_ok() {
+                        self.selected = BTreeSet::from([new]);
+                    }
+                    return;
+                }
+                let merge_kind = if parallel {
+                    registry::shader_kind("fx_merge.wgsl")
+                } else {
+                    registry::LAYER_MIXER.to_string()
+                };
                 let spec = match registry::spec_for(&merge_kind, c.library) {
                     Ok(s) => s,
                     Err(e) => return self.say(ui, e),
                 };
                 let mut m = c.graph.new_node(&spec);
-                m.label = if parallel { "Parallel Mix" } else { "Layer" }.into();
+                m.label = if parallel { "Parallel Mix" } else { "Layers" }.into();
                 m.pos = [b.pos[0] + 2.0 * (NODE_W + 48.0), b.pos[1]];
                 if let Some(p) = m.param_mut("mode") {
                     p.value = ParamValue::Choice(0); // Normal
@@ -2540,19 +2622,7 @@ impl Editor {
                     node: new,
                     pos: [b.pos[0] + NODE_W + 48.0, b.pos[1] + 160.0],
                 });
-                // Same input as the node beside it.
-                if let (Some(input), Some(src)) = (
-                    &first_image,
-                    b.inputs
-                        .iter()
-                        .find(|p| p.ty == PortType::Image)
-                        .and_then(|p| c.graph.input_link(beside, &p.name)),
-                ) {
-                    cmds.push(Command::Connect(Link::new(
-                        src.from.clone(),
-                        Endpoint::input(new, input),
-                    )));
-                }
+                cmds.extend(same_input.clone());
                 // The merge takes over where `beside` was going.
                 for l in c.graph.links().iter().filter(|l| {
                     l.from.node == beside
@@ -2564,13 +2634,18 @@ impl Editor {
                         l.to.clone(),
                     )));
                 }
+                let (under, over) = if parallel {
+                    ("base".to_string(), "top".to_string())
+                } else {
+                    (registry::layer_port(1), registry::layer_port(2))
+                };
                 cmds.push(Command::Connect(Link::new(
                     OutputRef::new(beside, &b_out),
-                    Endpoint::input(mid, "base"),
+                    Endpoint::input(mid, &under),
                 )));
                 cmds.push(Command::Connect(Link::new(
                     OutputRef::new(new, &out),
-                    Endpoint::input(mid, "top"),
+                    Endpoint::input(mid, &over),
                 )));
             }
         }

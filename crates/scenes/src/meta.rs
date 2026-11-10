@@ -50,8 +50,8 @@ pub struct SceneMeta {
     /// combines the pictures plugged into its `images`).
     #[serde(default, alias = "KIND")]
     pub kind: ModuleKind,
-    /// Picture inputs of an effect (at most two), read in WGSL with
-    /// `img_<name>(uv)` (or `image_a(uv)` / `image_b(uv)`).
+    /// Picture inputs of an effect (at most four), read in WGSL with
+    /// `img_<name>(uv)` (or `image_a(uv)` ... `image_d(uv)`).
     #[serde(default, alias = "IMAGES")]
     pub images: Vec<ImageDef>,
     #[serde(default, alias = "INPUTS")]
@@ -84,7 +84,7 @@ pub enum ModuleKind {
 }
 
 /// Maximum picture inputs of an effect.
-pub const MAX_IMAGES: usize = 2;
+pub const MAX_IMAGES: usize = 4;
 
 /// A picture input of an effect.
 #[derive(Debug, Clone, Deserialize)]

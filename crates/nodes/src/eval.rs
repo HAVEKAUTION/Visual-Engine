@@ -12,13 +12,18 @@
 //! - Image / Video / Camera nodes read files and cameras through
 //!   [`media::MediaLibrary`] and draw them with a small built-in shader
 //!   (fit / fill / stretch, mirror, scale).
+//! - Every picture node's **mask** plug works: the node's result shows
+//!   where the mask is white, its input (or nothing, for a source) where
+//!   it's black (a built-in pass after the node).
+//! - The Layer Mixer stacks its layers bottom to top, one built-in blend
+//!   pass per layer (W3C blend maths, see `scenes::blend`).
 //! - Media nodes also turn what they show into video signals (motion,
 //!   brightness, colour); the first one in the graph that "feeds the video
 //!   signals" puts them on the bus for everything else (one frame later).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use graph::{Graph, Node, NodeId, Param, ParamValue};
+use graph::{Graph, MASK_PORT, Node, NodeId, Param, ParamValue};
 use media::{CameraMode, MediaLibrary, Quality, Status, VideoSignals};
 use render::{MEDIA_KEY, Renderer, ScenePipeline, Show};
 use scenes::{CompiledScene, ParamState, SceneLibrary, SignalState};
@@ -464,6 +469,28 @@ pub struct Evaluator {
     bus_source: Option<NodeId>,
     /// Sizes and rates each Camera node's camera offers.
     camera_modes: HashMap<NodeId, std::sync::Arc<Vec<CameraMode>>>,
+    /// Built-in passes (mask, layer blend), built on first use.
+    builtin: HashMap<&'static str, Option<(ScenePipeline, ParamState)>>,
+}
+
+/// Renderer keys of the extra pictures a node makes (its masked result,
+/// its Layer Mixer steps), next to its own key.
+const MASKED_KEY: u64 = 1 << 60;
+const LAYER_KEY: u64 = 1 << 59;
+
+/// One layer going into a Layer Mixer this frame.
+struct LayerIn {
+    picture: u64,
+    mode: f32,
+    opacity: f32,
+}
+
+fn set_input(ps: &mut ParamState, name: &str, v: f32) {
+    if let Some(i) = ps.meta().input_index(name)
+        && ps.effective[i].len() == 1
+    {
+        ps.effective[i][0] = v;
+    }
 }
 
 impl Evaluator {
@@ -484,7 +511,108 @@ impl Evaluator {
             bus_video: IDLE_VIDEO,
             bus_source: None,
             camera_modes: HashMap::new(),
+            builtin: HashMap::new(),
         }
+    }
+
+    /// A built-in pass, built the first time it's needed (`None` if it
+    /// failed to build, which a test would catch).
+    fn builtin(
+        &mut self,
+        file: &'static str,
+        library: &SceneLibrary,
+        renderer: &Renderer,
+    ) -> Option<&mut (ScenePipeline, ParamState)> {
+        if !self.builtin.contains_key(file) {
+            let built = self.compiled(file, library).and_then(|c| {
+                renderer
+                    .create_scene(&c)
+                    .map(|p| (p, ParamState::new(&c.meta)))
+            });
+            if let Err(e) = &built {
+                log::error!("built-in pass {file}: {e}");
+            }
+            self.builtin.insert(file, built.ok());
+        }
+        self.builtin.get_mut(file).and_then(|b| b.as_mut())
+    }
+
+    /// Limit a node to its mask, if one is plugged in (see the module docs).
+    #[allow(clippy::too_many_arguments)]
+    fn apply_mask(
+        &mut self,
+        graph: &Graph,
+        node: &Node,
+        library: &SceneLibrary,
+        renderer: &mut Renderer,
+        signals: &SignalState,
+        size: (u32, u32),
+        image: &mut HashMap<NodeId, Option<u64>>,
+    ) {
+        let id = node.id;
+        let Some(mask) = graph
+            .input_link(id, MASK_PORT)
+            .and_then(|l| image.get(&l.from.node).copied().flatten())
+        else {
+            return;
+        };
+        let Some(result) = image.get(&id).copied().flatten() else {
+            return;
+        };
+        let orig = node
+            .inputs
+            .iter()
+            .filter(|p| p.ty == graph::PortType::Image)
+            .find_map(|p| graph.input_link(id, &p.name))
+            .and_then(|l| image.get(&l.from.node).copied().flatten());
+        let key = MASKED_KEY | self.key(id);
+        let Some((pipe, ps)) = self.builtin(MASK_SHADER, library, renderer) else {
+            return;
+        };
+        set_input(ps, "has_orig", if orig.is_some() { 1.0 } else { 0.0 });
+        renderer.render_node(
+            key,
+            size,
+            pipe,
+            signals.as_bytes(),
+            ps.block(),
+            [orig, Some(result), Some(mask), None],
+        );
+        image.insert(id, Some(key));
+    }
+
+    /// Stack the layers bottom to top. `None` = no layers (black).
+    #[allow(clippy::too_many_arguments)]
+    fn mix_layers(
+        &mut self,
+        id: NodeId,
+        layers: &[LayerIn],
+        linear: bool,
+        library: &SceneLibrary,
+        renderer: &mut Renderer,
+        signals: &SignalState,
+        size: (u32, u32),
+    ) -> Option<u64> {
+        let base = self.key(id);
+        let (pipe, ps) = self.builtin(LAYER_SHADER, library, renderer)?;
+        let mut below: Option<u64> = None;
+        for (step, layer) in layers.iter().enumerate() {
+            let key = LAYER_KEY | ((step as u64) << 48) | base;
+            set_input(ps, "mode", layer.mode);
+            set_input(ps, "opacity", layer.opacity);
+            set_input(ps, "linear", if linear { 1.0 } else { 0.0 });
+            set_input(ps, "has_back", if below.is_some() { 1.0 } else { 0.0 });
+            renderer.render_node(
+                key,
+                size,
+                pipe,
+                signals.as_bytes(),
+                ps.block(),
+                [below, Some(layer.picture), None, None],
+            );
+            below = Some(key);
+        }
+        below
     }
 
     /// A media node's video signals (motion, x, y, brightness, hue).
@@ -541,7 +669,9 @@ impl Evaluator {
             .entry(file.to_string())
             .or_insert_with(|| match library.get(file) {
                 Some(e) => scenes::compile(&e.source, file),
-                None if file == MEDIA_SHADER => scenes::compile(MEDIA_SHADER_SRC, file),
+                None if registry::builtin_shader(file).is_some() => {
+                    scenes::compile(registry::builtin_shader(file).unwrap_or_default(), file)
+                }
                 None => Err(format!("{file} is not in the scenes folder")),
             })
             .clone()
@@ -716,6 +846,79 @@ impl Evaluator {
                         .and_then(|l| image.get(&l.from.node).copied().flatten());
                     image.insert(id, src);
                 }
+                LAYER_MIXER => {
+                    if node.bypass {
+                        image.insert(id, first_input(&image));
+                        continue;
+                    }
+                    let flag = |name: &str| {
+                        matches!(
+                            node.param(name).map(|p| &p.value),
+                            Some(ParamValue::Bool(true))
+                        )
+                    };
+                    let mut layers = Vec::new();
+                    let mut solos = Vec::new();
+                    for i in 1..=LAYERS {
+                        if let Some(p) = node.param(&layer_param("opacity", i)) {
+                            self.live.insert((id, p.def.name.clone()), eff(p));
+                        }
+                        let Some(picture) = graph
+                            .input_link(id, &layer_port(i))
+                            .and_then(|l| image.get(&l.from.node).copied().flatten())
+                        else {
+                            continue;
+                        };
+                        let mode = match node.param(&layer_param("mode", i)).map(|p| &p.value) {
+                            Some(ParamValue::Choice(c)) => *c as f32,
+                            _ => 0.0,
+                        };
+                        let opacity = node
+                            .param(&layer_param("opacity", i))
+                            .map(eff)
+                            .unwrap_or(1.0);
+                        solos.push(flag(&layer_param("solo", i)));
+                        layers.push((
+                            LayerIn {
+                                picture,
+                                mode,
+                                opacity,
+                            },
+                            flag(&layer_param("mute", i)),
+                        ));
+                    }
+                    // Solo wins over mute; with no solo, muted layers drop out.
+                    let any_solo = solos.iter().any(|s| *s);
+                    let layers: Vec<LayerIn> = layers
+                        .into_iter()
+                        .zip(solos)
+                        .filter(|((_, mute), solo)| if any_solo { *solo } else { !mute })
+                        .map(|((l, _), _)| l)
+                        .collect();
+                    let scale = if main.contains(&id) { 1.0 } else { 0.25 };
+                    let size =
+                        graph::node_size(node.resolution, input.output_size, input.proxy * scale);
+                    let linear = flag("linear");
+                    let out = self.mix_layers(
+                        id,
+                        &layers,
+                        linear,
+                        library,
+                        renderer,
+                        input.signals,
+                        size,
+                    );
+                    image.insert(id, out);
+                    self.apply_mask(
+                        graph,
+                        node,
+                        library,
+                        renderer,
+                        input.signals,
+                        size,
+                        &mut image,
+                    );
+                }
                 kind => {
                     let is_media = registry::is_media_kind(kind);
                     let file = if is_media {
@@ -810,14 +1013,14 @@ impl Evaluator {
                     }
                     rt.params.advance(input.signals, input.dt);
                     input.signals.set_palette(&rt.params.current_palette());
-                    let mut inputs: [Option<u64>; 2] = std::array::from_fn(|i| {
+                    let mut inputs: [Option<u64>; 4] = std::array::from_fn(|i| {
                         meta.images
                             .get(i)
                             .and_then(|img| graph.input_link(id, &img.name))
                             .and_then(|l| image.get(&l.from.node).copied().flatten())
                     });
                     if let Some(k) = media_key {
-                        inputs = [Some(k), None];
+                        inputs = [Some(k), None, None, None];
                     }
                     // Nodes only shown as thumbnails render at a quarter size.
                     let scale = if main.contains(&id) { 1.0 } else { 0.25 };
@@ -843,6 +1046,15 @@ impl Evaluator {
                             image.insert(id, first_input(&image));
                         }
                     }
+                    self.apply_mask(
+                        graph,
+                        node,
+                        library,
+                        renderer,
+                        input.signals,
+                        size,
+                        &mut image,
+                    );
                 }
             }
         }

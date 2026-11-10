@@ -401,3 +401,224 @@ fn video_node_scrubs_to_the_asked_position() {
     assert!(motion > 0.2, "motion {motion}");
     assert!(bright > 0.2, "brightness {bright}");
 }
+
+/// One renderer and evaluator kept across frames (for tests that change
+/// the graph between frames).
+struct Session {
+    r: Renderer,
+    ev: Evaluator,
+    sig: SignalState,
+    lib: SceneLibrary,
+}
+
+impl Session {
+    fn new() -> Option<Self> {
+        let (device, queue) = gpu()?;
+        Some(Self {
+            r: Renderer::new(&device, &queue),
+            ev: Evaluator::new(1000),
+            sig: SignalState::new(),
+            lib: SceneLibrary::new(None),
+        })
+    }
+
+    fn frame(&mut self, g: &Graph, out: NodeId) -> Vec<u8> {
+        self.sig.update(
+            &SignalFrame::default(),
+            1.0 / 60.0,
+            [SIZE.0 as f32, SIZE.1 as f32],
+        );
+        self.r.begin_frame(SIZE);
+        let shown = self.ev.run(
+            g,
+            &self.lib,
+            &mut self.r,
+            FrameInput {
+                signals: &mut self.sig,
+                dt: 1.0 / 60.0,
+                controls: &[0.0; 8],
+                intensity: 1.0,
+                output_size: SIZE,
+                proxy: 1.0,
+            },
+            &[out],
+            &[],
+        );
+        self.r.present_from([shown, Show::Black], Master::default());
+        self.r.end_frame();
+        self.r
+            .read_display()
+            .map(|(_, _, px)| px)
+            .unwrap_or_default()
+    }
+
+    /// Run until every Image node has loaded its picture.
+    fn settle(&mut self, g: &Graph, out: NodeId, images: &[NodeId]) {
+        let start = std::time::Instant::now();
+        loop {
+            self.frame(g, out);
+            let ready = images
+                .iter()
+                .all(|i| self.ev.media_info(*i).is_some_and(|s| s.contains('×')));
+            if ready || start.elapsed().as_secs() > 15 {
+                // One more so everything downstream has the pictures.
+                self.frame(g, out);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
+
+fn pixel(px: &[u8], x: u32, y: u32) -> [u8; 4] {
+    let i = ((y * SIZE.0 + x) * 4) as usize;
+    [px[i], px[i + 1], px[i + 2], px[i + 3]]
+}
+
+/// An Image node showing a picture made by `f(x, y)` (stretched to fill).
+fn picture_node(g: &mut Graph, name: &str, f: impl Fn(u32, u32) -> [u8; 4]) -> NodeId {
+    let dir = std::env::temp_dir().join(format!("ve-gpu-m5-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(format!("{name}.png"));
+    image::RgbaImage::from_fn(64, 36, |x, y| image::Rgba(f(x, y)))
+        .save(&path)
+        .unwrap();
+    let n = add(g, registry::IMAGE);
+    set(
+        g,
+        n,
+        registry::FILE_PARAM,
+        graph::ParamValue::Text(path.display().to_string()),
+    );
+    set(g, n, "fit", graph::ParamValue::Choice(2));
+    n
+}
+
+#[test]
+fn every_blend_mode_on_the_gpu_matches_the_reference_maths() {
+    let Some(mut s) = Session::new() else { return };
+    let (b, f) = ([51u8, 128, 204, 255], [153u8, 77, 230, 255]);
+    let mut g = Graph::new();
+    let back = picture_node(&mut g, "back", |_, _| b);
+    let front = picture_node(&mut g, "front", |_, _| f);
+    let mix = add(&mut g, registry::LAYER_MIXER);
+    let out = add(&mut g, PROGRAM_OUT);
+    wire(&mut g, back, mix, &registry::layer_port(1));
+    wire(&mut g, front, mix, &registry::layer_port(2));
+    wire(&mut g, mix, out, "image");
+    s.settle(&g, out, &[back, front]);
+    let unit = |c: [u8; 4]| c.map(|v| v as f32 / 255.0);
+    for linear in [false, true] {
+        set(&mut g, mix, "linear", graph::ParamValue::Bool(linear));
+        for (m, name) in scenes::blend::BLEND_MODES.iter().enumerate() {
+            set(
+                &mut g,
+                mix,
+                &registry::layer_param("mode", 2),
+                graph::ParamValue::Choice(m as u32),
+            );
+            let px = s.frame(&g, out);
+            let got = pixel(&px, SIZE.0 / 2, SIZE.1 / 2);
+            let want = scenes::blend::blend_over(unit(b), unit(f), m, 1.0, linear);
+            for c in 0..3 {
+                let w = (want[c].clamp(0.0, 1.0) * 255.0).round() as i32;
+                assert!(
+                    (got[c] as i32 - w).abs() <= 2,
+                    "{name} (linear {linear}): got {got:?}, want {:?}",
+                    want.map(|v| (v * 255.0).round())
+                );
+            }
+        }
+    }
+    // Merge uses the same maths: Hard Light at half opacity.
+    let merge = add(&mut g, &registry::shader_kind("fx_merge.wgsl"));
+    wire(&mut g, back, merge, "base");
+    wire(&mut g, front, merge, "top");
+    wire(&mut g, merge, out, "image");
+    let hard = scenes::blend::mode_index("Hard Light").unwrap();
+    set(
+        &mut g,
+        merge,
+        "mode",
+        graph::ParamValue::Choice(hard as u32),
+    );
+    set(&mut g, merge, "opacity", graph::ParamValue::Float(0.5));
+    s.frame(&g, out);
+    let got = pixel(&s.frame(&g, out), 10, 10);
+    let want = scenes::blend::blend_over(unit(b), unit(f), hard, 0.5, false);
+    for c in 0..3 {
+        assert!(
+            (got[c] as f32 - want[c] * 255.0).abs() <= 2.0,
+            "merge {got:?} {want:?}"
+        );
+    }
+}
+
+#[test]
+fn masks_limit_any_node_and_layers_solo_and_mute() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let blue = picture_node(&mut g, "blue", |_, _| [0, 0, 255, 255]);
+    let red = picture_node(&mut g, "red", |_, _| [255, 0, 0, 255]);
+    // White on the left half, black on the right.
+    let half = picture_node(&mut g, "half", |x, _| {
+        if x < 32 { [255; 4] } else { [0, 0, 0, 255] }
+    });
+    let mix = add(&mut g, registry::LAYER_MIXER);
+    let out = add(&mut g, PROGRAM_OUT);
+    wire(&mut g, blue, mix, &registry::layer_port(1));
+    wire(&mut g, red, mix, &registry::layer_port(2));
+    wire(&mut g, mix, out, "image");
+    s.settle(&g, out, &[blue, red]);
+    let left = |px: &[u8]| pixel(px, SIZE.0 / 4, SIZE.1 / 2);
+    let right = |px: &[u8]| pixel(px, SIZE.0 * 3 / 4, SIZE.1 / 2);
+    // Red (Normal) on top of blue.
+    let px = s.frame(&g, out);
+    assert!(left(&px)[0] > 240 && left(&px)[2] < 15, "{:?}", left(&px));
+    // Masked: the mix shows on the left; its input (blue) on the right.
+    wire(&mut g, half, mix, graph::MASK_PORT);
+    s.settle(&g, out, &[half]);
+    let px = s.frame(&g, out);
+    assert!(left(&px)[0] > 240, "left {:?}", left(&px));
+    assert!(
+        right(&px)[2] > 240 && right(&px)[0] < 15,
+        "right {:?}",
+        right(&px)
+    );
+    // A masked source: the picture on the left, nothing (black) on the right.
+    let l = g.input_link(mix, graph::MASK_PORT).unwrap().clone();
+    g.apply(Command::Disconnect(l)).unwrap();
+    wire(&mut g, half, red, graph::MASK_PORT);
+    wire(&mut g, red, out, "image");
+    let px = s.frame(&g, out);
+    assert!(left(&px)[0] > 240, "{:?}", left(&px));
+    assert!(right(&px)[..3].iter().all(|v| *v < 15), "{:?}", right(&px));
+    // Back to the mixer: mute the top layer → blue; solo it → red alone.
+    let l = g.input_link(red, graph::MASK_PORT).unwrap().clone();
+    g.apply(Command::Disconnect(l)).unwrap();
+    wire(&mut g, mix, out, "image");
+    set(
+        &mut g,
+        mix,
+        &registry::layer_param("mute", 2),
+        graph::ParamValue::Bool(true),
+    );
+    let px = s.frame(&g, out);
+    assert!(
+        left(&px)[2] > 240 && left(&px)[0] < 15,
+        "muted {:?}",
+        left(&px)
+    );
+    set(
+        &mut g,
+        mix,
+        &registry::layer_param("solo", 2),
+        graph::ParamValue::Bool(true),
+    );
+    let px = s.frame(&g, out);
+    assert!(
+        left(&px)[0] > 240 && left(&px)[2] < 15,
+        "solo {:?}",
+        left(&px)
+    );
+}

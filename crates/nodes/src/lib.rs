@@ -7,6 +7,7 @@
 
 pub mod demo;
 pub mod eval;
+pub mod layers;
 pub mod registry;
 
 pub use eval::{Evaluator, FrameInput, effective_value};

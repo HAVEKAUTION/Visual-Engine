@@ -69,10 +69,18 @@ pub struct Node {
 impl Node {
     /// Bring a node saved by an older version up to date with its type:
     /// plugs and settings added since are added (settings at their
-    /// defaults, in the spec's order). Nothing is removed or changed.
-    /// Returns true if anything was added.
+    /// defaults, in the spec's order), and existing settings get the
+    /// current labels, ranges and choices (their values stay). Nothing is
+    /// removed. Returns true if anything was added.
     pub fn add_missing_from(&mut self, spec: &NodeSpec) -> bool {
         let mut changed = false;
+        for p in &mut self.params {
+            if let Some(def) = spec.params.iter().find(|d| d.name == p.def.name)
+                && std::mem::discriminant(&def.default) == std::mem::discriminant(&p.value)
+            {
+                p.def = def.clone();
+            }
+        }
         for (i, port) in spec.inputs.iter().enumerate() {
             if self.input(&port.name).is_none() {
                 // Before the automatic mask plug, which always comes last.

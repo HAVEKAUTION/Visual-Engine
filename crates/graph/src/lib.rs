@@ -21,7 +21,7 @@ pub use model::{
     PublishedParam, Resolution, WireMod,
 };
 pub use plan::node_size;
-pub use types::{NodeSpec, Param, ParamDef, ParamValue, PortDef, PortType};
+pub use types::{MASK_PORT, NodeSpec, Param, ParamDef, ParamValue, PortDef, PortType};
 
 #[cfg(test)]
 mod tests;

@@ -53,6 +53,9 @@ fn main() -> eframe::Result {
             .with_min_inner_size([800.0, 500.0]),
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: wgpu_options(),
+        // A custom data folder (tests, a second setup) keeps the layout and
+        // settings there too, not just the graph.
+        persistence_path: std::env::var_os("VISUAL_ENGINE_DATA").map(std::path::PathBuf::from),
         ..Default::default()
     };
 

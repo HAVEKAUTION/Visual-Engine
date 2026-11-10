@@ -2,6 +2,24 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M5 part 1: blend modes, masks, Layer Mixer
+- **21 blend modes**, the exact W3C / Photoshop maths (Normal, Add, Screen, Multiply,
+  Overlay, Difference, Lighten, Darken, Subtract, Exclusion, Colour Dodge / Burn,
+  Hard / Soft / Vivid / Linear / Pin Light, Hue, Saturation, Colour, Luminosity),
+  with alpha and opacity, in display values by default or linear light per node.
+  A Rust reference with known-value tests; a GPU test checks every mode against it.
+  Shaders can use them too: `blend_rgb` and `blend_over` in the prelude.
+- **Merge** uses them (old graphs keep their mode).
+- **Every node's Mask plug works**: the node shows where the mask is white and its
+  input (or nothing, for a source) where it's black.
+- **Layer Mixer** node: up to 8 layers, bottom to top, each with blend mode, opacity,
+  solo and mute; move layers up/down in the Inspector (one undo step). The node grows
+  a free plug as you wire it. **L** now adds a layer through a Layer Mixer (or into
+  the next free slot of the one already there).
+- Effects can take up to 4 pictures.
+- Saved graphs pick up new settings and choices (e.g. Merge's new modes) when loaded.
+- `VISUAL_ENGINE_DATA` now also holds the window layout and settings.
+
 ## 2026-11-10 — v2 M4 part 2: cameras, video signals, sound/picture sync
 - **Camera** node (Sources): any webcam or capture card, via nokhwa (Media
   Foundation / AVFoundation / V4L2). Pick the camera, size and frame rate in the

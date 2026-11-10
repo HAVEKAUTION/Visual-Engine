@@ -9,6 +9,7 @@
 //! | 2       | `smp`        | linear, clamp-to-edge sampler               |
 //! | 3       | `prev_frame` | the scene's previous output (feedback)      |
 //! | 4, 5    | `buf_a/b`    | off-screen buffers (ping-pong when persistent) |
+//! | 6 – 9   | `image_in_a..d` | an effect's picture inputs (black if none) |
 //!
 //! Scenes render into 16-bit float textures in display (sRGB-like) space, the
 //! way Shadertoy-style shaders expect. There are two **decks**, each with its
@@ -314,6 +315,8 @@ impl Renderer {
                 texture_entry(5),
                 texture_entry(6),
                 texture_entry(7),
+                texture_entry(8),
+                texture_entry(9),
             ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -502,7 +505,7 @@ impl Renderer {
             Some(t) => t,
             None => DeckTargets::new(&self.device, self.size, &format!("deck {deck}")),
         };
-        self.draw(&mut t, scene, signals, params, [None, None], None);
+        self.draw(&mut t, scene, signals, params, [None; 4], None);
         self.decks[deck] = Some(t);
     }
 
@@ -517,7 +520,7 @@ impl Renderer {
         scene: &ScenePipeline,
         signals: &[u8],
         params: &[f32],
-        inputs: [Option<u64>; 2],
+        inputs: [Option<u64>; 4],
     ) {
         if self.display.is_none() {
             return;
@@ -696,7 +699,7 @@ impl Renderer {
         scene: &ScenePipeline,
         signals: &[u8],
         params: &[f32],
-        inputs: [Option<&wgpu::TextureView>; 2],
+        inputs: [Option<&wgpu::TextureView>; 4],
         timing: Option<u32>,
     ) {
         for i in 0..MAX_BUFFERS {
@@ -723,8 +726,7 @@ impl Renderer {
         });
         let prev_out = t.out_cur;
         let next_out = 1 - t.out_cur;
-        let in_a = inputs[0].unwrap_or(&self.black.view);
-        let in_b = inputs[1].unwrap_or(&self.black.view);
+        let input = |i: usize| inputs[i].unwrap_or(&self.black.view);
 
         let last = scene.passes.len().saturating_sub(1);
         for (pass_i, (pipeline, target)) in scene.passes.iter().enumerate() {
@@ -765,8 +767,10 @@ impl Renderer {
                     tex_entry(3, &t.output[prev_out].view),
                     tex_entry(4, buf_view(0)),
                     tex_entry(5, buf_view(1)),
-                    tex_entry(6, in_a),
-                    tex_entry(7, in_b),
+                    tex_entry(6, input(0)),
+                    tex_entry(7, input(1)),
+                    tex_entry(8, input(2)),
+                    tex_entry(9, input(3)),
                 ],
             });
             // Write into the copy that isn't being read.

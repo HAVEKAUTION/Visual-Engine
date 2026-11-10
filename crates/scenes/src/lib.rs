@@ -8,6 +8,7 @@
 //! - [`palette`]: colour palettes.
 //! - [`preset`]: saved scene settings and modulations.
 
+pub mod blend;
 pub mod builtin;
 pub mod compile;
 pub mod library;

@@ -316,6 +316,38 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M5 part 1 – Blend modes, masks, Layer Mixer
+
+Run: `cargo run --release -p app` (close any running copy first)
+
+**Layer Mixer**
+- [ ] Select a picture node (e.g. a scene) and press **L**, pick a picture or video:
+      a **Layers** node appears with the old one as Layer 1 and the new one on top.
+      Select the new node, press **L** again: a third layer joins the same mixer.
+- [ ] The Layer Mixer node only shows the layers in use plus one free plug.
+- [ ] Inspector: layers listed top first. Change a layer's blend to **Hard Light**,
+      **Soft Light**, **Multiply**, **Colour**, **Luminosity**: each looks clearly
+      different. Opacity fades it.
+- [ ] **S** (solo) shows only soloed layers; **M** (mute) hides one; the name gets a
+      line through it.
+- [ ] **▲ / ▼** move a layer: the picture order changes. Ctrl+Z puts it back.
+- [ ] Wire an LFO into a layer's opacity, then move that layer: the wire moves too.
+
+**Masks on any node**
+- [ ] Drop a black-and-white picture (white shape on black) into the graph and wire
+      it into any node's green **Mask** plug: the node only shows inside the white.
+      On an effect (e.g. Glitch) the effect only happens there; outside you see its
+      input untouched.
+- [ ] On a source (scene, picture, video) the outside becomes see-through, so in a
+      Layer Mixer the layers below show through.
+
+**Merge**
+- [ ] An old saved Merge still has its blend mode; the list now has 21 modes.
+      "Blend in linear light" gives softer, more physical mixes (try Add, Screen).
+
+Known gaps (M5 part 2): keys (Luma, Chroma), Shape / Gradient / Motion masks and
+the Key Mixer; on-viewer handles for Transform and Corner Pin; the compositing demo.
+
 ## v2 M4 part 2 – Cameras, video signals, sync
 
 Run: `cargo run --release -p app` (close any running copy first)
