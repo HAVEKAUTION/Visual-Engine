@@ -356,7 +356,7 @@ fonts from the system. Lyric tracks stay in the ideas bank.
 - **Venue preview** (M8): see the output projected on a wall in a dark virtual club,
   for judging how it reads in a room. Preview only, never in the output.
 
-**UI to release quality** (new **M3b**, see the ordering question below)
+**UI to release quality** (new **M3b**, after M5)
 - Full visual pass (spacing, type scale, icons, empty states, motion).
 - **Themes**: a theme file (RON, CSS-like names: colours, radius, spacing, font
   sizes) loaded at start and live-reloaded; users can share theme files.
@@ -381,14 +381,14 @@ icons on Windows, desktop-level window on macOS, low-power option), Spout/Syphon
 **Tutorial (after M7)**: an interactive walkthrough inside the app (highlights a
 panel, waits for the user to do the step), plus a starter Look per feature.
 
-**Twitch: discuss before building.** Proposal: off by default; viewers spend channel
-points to fire *small, streamer-approved* events (a flash of colour, a Look vote that
-applies at the next phrase), with cooldowns, per-user limits and the photosensitivity
-guard always on. No free text into visuals.
+**Twitch: decided 2026-11-10, skip it.** Streaming is covered by Spout/NDI into OBS.
+
+**Order decided 2026-11-10:** M4 media → M5 compositing → M3b UI pass (themes,
+docking, polish) → M6 … Desktop mode ships with the M8 outputs.
 
 ## Ideas bank (do NOT build until asked)
 Lyric/typography tracks synced to the song · Spotify Canvas & TikTok loop export ·
-DMX/Art-Net lighting sync · Pioneer/DJ link · OSC/Twitch-chat signals · phone as a
+DMX/Art-Net lighting sync · Pioneer/DJ link · OSC signals · phone as a
 wireless controller · Look sharing (single file) and a community gallery · stems
 input (separate drums/bass/vocals signals) · LED wall pixel mapping · AI generative
 source node (later, optional, never required).
