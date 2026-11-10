@@ -313,6 +313,79 @@ separate pages.
 - M9 Video intelligence: motion flow, chroma/person keying via segmentation
 - M10 Record + export (4K, vertical 9:16, square, loops), Ableton Link
 
+## v2.1 additions (2026-11-10, from the user's playtest notes)
+
+The user's wishes after M3, placed into the milestones. Research behind them is in
+`RESEARCH.md`. ✅ = done.
+
+**Node editor**
+- ✅ Bolder nodes; Ctrl+scroll sizes nodes and text; per-node live picture on/off.
+- ✅ Hold node ("on the drop, bend until the next hat / for N beats").
+
+**Timing and logic (the "if this, then that, until …" depth)**, mostly M6, pulled
+earlier where cheap:
+- Trigger logic: **Logic** (AND / OR / NOT / XOR of triggers or gates), **Delay**
+  (fire N beats/seconds later), **Chance** (fire with probability p, seeded),
+  **Every Nth**, **Switch** (pick one of N signals or pictures by a counter/trigger),
+  **Step Sequencer** (16 steps per bar, FL-style pattern grid, outputs signal +
+  trigger), **Busyness** (onset rate as a smooth signal: how much is happening).
+- Every image node keeps an audio-driven **mask** input (M5), so any sound can
+  limit any effect to an area, and colour nodes take signals (M6).
+
+**Media reacting to the music (M4/M5)**
+- Image and video sources are ordinary picture nodes, so every effect and every
+  signal works on them. M5/M6 add the "contort it" effects: Displace by noise or by
+  another picture, Liquify/Warp, Bend, Twist, Ripple from the centre on kicks, Slit
+  scan, Datamosh smear, Stutter. Each with an original twist (below).
+
+**Original, not generic (M6)**
+- Every built-in effect needs its own idea, not the textbook version. Example:
+  **Kaleido** becomes a symmetry engine: n-gon folds (triangle, square, diamond,
+  hexagon, star), all 17 wallpaper symmetry groups for tiling, a fold count that can
+  be driven by signals (morphing smoothly between shapes), and a "breathing" centre.
+- **ISF shader import** (GLSL + JSON header via naga): thousands of existing shaders.
+
+**Text (M6)**: a Text source where each letter is its own instance: per-glyph
+stagger, scale/offset/rotation by signals, beat-locked reveal, outline/extrude,
+fonts from the system. Lyric tracks stay in the ideas bank.
+
+**Depth: "part of the wall, not a screen" (M6, preview in M8)**
+- 2.5D nodes: Depth from brightness (displaced relief with lighting), Parallax
+  layers, Volumetric light and fog shafts, Lens/bloom/chromatic edge, LED-wall and
+  CRT surface simulation, room reflections.
+- **Venue preview** (M8): see the output projected on a wall in a dark virtual club,
+  for judging how it reads in a room. Preview only, never in the output.
+
+**UI to release quality** (new **M3b**, see the ordering question below)
+- Full visual pass (spacing, type scale, icons, empty states, motion).
+- **Themes**: a theme file (RON, CSS-like names: colours, radius, spacing, font
+  sizes) loaded at start and live-reloaded; users can share theme files.
+- **Dockable workspace** (Adobe/Unity/OBS style): drag panels anywhere, tabs, split,
+  float, saved layouts ("Build", "Perform", "Stream"). Built on `egui_tiles` (egui
+  0.37 compatible).
+
+**Export (M10)**: visual only, or visual + audio. Audio comes from the song file,
+or from what we *captured* live (computer audio / input), recorded alongside the
+frames so live sets export too.
+
+**DJs and MIDI (M7, pro level)**: MIDI learn on anything (knobs, pads, jog wheels,
+notes → triggers, CC → signals, 14-bit CC), controller profiles with LED feedback
+(Launchpad, APC40, DDJ…), MIDI clock in, Ableton Link (M10 → pulled into M7).
+PRO DJ LINK (Pioneer) and StageLinQ (Denon) need licence programmes: apply before
+release.
+
+**Outputs (M8)**: projector mapping (mesh warp with Bézier points, masks, soft-edge
+blending for several projectors), **Desktop mode** (live wallpaper behind the desktop
+icons on Windows, desktop-level window on macOS, low-power option), Spout/Syphon/NDI.
+
+**Tutorial (after M7)**: an interactive walkthrough inside the app (highlights a
+panel, waits for the user to do the step), plus a starter Look per feature.
+
+**Twitch: discuss before building.** Proposal: off by default; viewers spend channel
+points to fire *small, streamer-approved* events (a flash of colour, a Look vote that
+applies at the next phrase), with cooldowns, per-user limits and the photosensitivity
+guard always on. No free text into visuals.
+
 ## Ideas bank (do NOT build until asked)
 Lyric/typography tracks synced to the song · Spotify Canvas & TikTok loop export ·
 DMX/Art-Net lighting sync · Pioneer/DJ link · OSC/Twitch-chat signals · phone as a

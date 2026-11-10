@@ -158,9 +158,10 @@ default **off**.
 
 ## Milestones
 
-**Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`**, built with the
-steps in `BUILD_STEPS_v2.md`. Next up: **v2 M2, the graph engine** (BUILD_STEPS_v2
-Step 1).
+**Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`** (plus the
+"v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
+built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3. Next up: **M4 media**
+(BUILD_STEPS_v2 Step 3), unless the user picks the UI pass (M3b) first.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.
