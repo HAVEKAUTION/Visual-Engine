@@ -11,7 +11,7 @@
     { "name": "spin_speed", "label": "Spin speed",    "type": "float", "min": -1,  "max": 1,   "default": 0.0 },
     { "name": "move_x",     "label": "Move sideways", "type": "float", "min": -1,  "max": 1,   "default": 0.0 },
     { "name": "move_y",     "label": "Move up/down",  "type": "float", "min": -1,  "max": 1,   "default": 0.0 },
-    { "name": "edges",      "label": "Edges",         "type": "choice", "options": ["Black", "Repeat", "Mirror"], "default": 2 }
+    { "name": "edges",      "label": "Edges",         "type": "choice", "options": ["Empty (see-through)", "Repeat", "Mirror"], "default": 2 }
   ],
   "clocks": [ { "name": "spin", "speed": "spin_speed", "signal": "loudness_slow", "amount": 1.0 } ]
 }*/
@@ -30,5 +30,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     } else {
         inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
     }
-    return vec4f(img_input(uv).rgb * inside, 1.0);
+    // Keep see-through parts (cut-outs) see-through; outside is empty.
+    return img_input(uv) * inside;
 }

@@ -2,7 +2,7 @@
   "name": "Switch",
   "kind": "effect",
   "author": "Visual Engine",
-  "description": "Shows one of up to four pictures and changes between them with a transition: the heart of a VJ set. Wire a Counter (fed by a Beat Trigger: every 4, 8 or 16 beats) into Show, and it moves to the next picture on time. Transition time is in beats, so it stays in step with the music.",
+  "description": "Shows one of up to four pictures and changes between them with a transition: the heart of a VJ set. Anything wired into Show moves it on: a Counter fed by a Beat Trigger (every 8 or 16 beats), a section change or a drop. Order Random never shows the same picture twice in a row, and Mix it up picks a different transition each time, so a set doesn't feel like a loop.",
   "images": [
     { "name": "a", "label": "Picture 1" },
     { "name": "b", "label": "Picture 2" },
@@ -12,16 +12,21 @@
   "inputs": [
     { "name": "show",       "label": "Show (0 = first, 1 = last)", "type": "float",  "min": 0, "max": 1, "default": 0 },
     { "name": "count",      "label": "Pictures used",              "type": "choice", "options": ["2", "3", "4"], "default": 2 },
-    { "name": "transition", "label": "Transition",                 "type": "choice", "options": ["Cut", "Dissolve", "Wipe", "Slide", "Zoom through", "Iris"], "default": 1 },
+    { "name": "order",      "label": "Order",                      "type": "choice", "options": ["In turn", "Random (never the same twice)"], "default": 0 },
+    { "name": "transition", "label": "Transition",                 "type": "choice", "options": ["Cut", "Dissolve", "Wipe", "Slide", "Zoom through", "Iris", "Mix it up (a different one each time)"], "default": 1 },
     { "name": "beats",      "label": "Transition time (beats)",    "type": "float",  "min": 0.05, "max": 8, "default": 1 }
   ],
   "buffers": [ { "name": "A", "persistent": true } ],
   "passes": [ { "entry": "fs_state", "target": "A" }, { "entry": "fs_main" } ]
 }*/
 
-// Buffer A holds the switch's memory (the same in every pixel):
-// r = picture now (0..3) / 4, g = picture before, b = transition progress
-// 0..1, a = 1 once started.
+// Buffer A is the switch's memory, the same across each half:
+// left half:  r = picture now / 4, g = picture before / 4, b = progress 0..1,
+//             a = 1 + transition used / 10 (0 = not started yet)
+// right half: r = the Show value last frame.
+
+const LEFT: vec2<f32> = vec2<f32>(0.25, 0.5);
+const RIGHT: vec2<f32> = vec2<f32>(0.75, 0.5);
 
 fn picture(i: i32, uv: vec2<f32>) -> vec4<f32> {
     switch i {
@@ -32,26 +37,53 @@ fn picture(i: i32, uv: vec2<f32>) -> vec4<f32> {
     }
 }
 
-fn target_index() -> i32 {
-    let n = f32(i32(params.count + 0.5) + 2);
+fn used() -> i32 {
+    return i32(params.count + 0.5) + 2;
+}
+
+fn in_turn_index() -> i32 {
+    let n = f32(used());
     return i32(round(clamp(params.show, 0.0, 1.0) * (n - 1.0)));
+}
+
+/// The transition for the next change (Mix it up: any but Cut, at random).
+fn pick_transition(seed: f32) -> f32 {
+    let mode = i32(params.transition + 0.5);
+    if mode == 6 {
+        return f32(1 + i32(hash11(seed) * 4.999));
+    }
+    return f32(mode);
 }
 
 @fragment
 fn fs_state(in: VsOut) -> @location(0) vec4<f32> {
-    let s = sample_a(vec2f(0.5));
-    let want = target_index();
+    let s = sample_a(LEFT);
+    let last_show = sample_a(RIGHT).r;
+    if in.uv.x >= 0.5 {
+        return vec4f(params.show, 0.0, 0.0, 1.0);
+    }
+    let n = used();
+    let seed = audio.time * 7.31 + params.show * 13.7;
     if s.a < 0.5 {
-        return vec4f(f32(want) / 4.0, f32(want) / 4.0, 1.0, 1.0);
+        let first = in_turn_index();
+        return vec4f(f32(first) / 4.0, f32(first) / 4.0, 1.0, 1.0 + pick_transition(seed) / 10.0);
     }
     let now = i32(round(s.r * 4.0));
+    var want = now;
+    if i32(params.order + 0.5) == 0 {
+        want = in_turn_index();
+    } else if abs(params.show - last_show) > 0.001 {
+        // Random: anything but the picture showing now.
+        want = (now + 1 + i32(hash11(seed) * f32(n - 1) * 0.999)) % n;
+    }
+    want = min(want, n - 1);
     if want != now {
-        return vec4f(f32(want) / 4.0, f32(now) / 4.0, 0.0, 1.0);
+        return vec4f(f32(want) / 4.0, f32(now) / 4.0, 0.0, 1.0 + pick_transition(seed + 3.1) / 10.0);
     }
     // Transition length in seconds from beats (120 BPM until the tempo is known).
     let bpm = select(120.0, audio.bpm, audio.bpm > 30.0);
     let secs = max(params.beats * 60.0 / bpm, 0.001);
-    return vec4f(s.r, s.g, min(s.b + audio.delta / secs, 1.0), 1.0);
+    return vec4f(s.r, s.g, min(s.b + audio.delta / secs, 1.0), s.a);
 }
 
 fn inside(uv: vec2<f32>) -> f32 {
@@ -60,10 +92,10 @@ fn inside(uv: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let s = sample_a(vec2f(0.5));
+    let s = sample_a(LEFT);
     let now = i32(round(s.r * 4.0));
     let before = i32(round(s.g * 4.0));
-    let mode = i32(params.transition + 0.5);
+    let mode = i32(round((s.a - 1.0) * 10.0));
     let t = smoothstep(0.0, 1.0, s.b);
     let uv = in.uv;
     if mode == 0 || s.b >= 1.0 || now == before {

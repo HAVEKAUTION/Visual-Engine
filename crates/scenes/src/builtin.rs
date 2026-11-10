@@ -81,6 +81,18 @@ pub const BUILTIN: &[Builtin] = &[
         source: include_str!("../shaders/fx_corner_pin.wgsl"),
     },
     Builtin {
+        file_name: "fx_displace.wgsl",
+        source: include_str!("../shaders/fx_displace.wgsl"),
+    },
+    Builtin {
+        file_name: "fx_liquid.wgsl",
+        source: include_str!("../shaders/fx_liquid.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_auto_cutout.wgsl",
+        source: include_str!("../shaders/mask_auto_cutout.wgsl"),
+    },
+    Builtin {
         file_name: "fx_switch.wgsl",
         source: include_str!("../shaders/fx_switch.wgsl"),
     },

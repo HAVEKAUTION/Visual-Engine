@@ -176,7 +176,9 @@ built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. M3b done (doc
 layouts, Sources panel, themes in `app/src/theme.rs`: UI colours come from
 `theme::accent()` etc., never new hard-coded colours). M6 part 1 done
 (templates in `nodes/src/templates.rs`, Switch node, Phosphor icons in
-`app/src/icons.rs`: never use emoji in the UI). Next up: **M6 part 2**: the user
+`app/src/icons.rs`: never use emoji in the UI). M6 part 1b done (woven template,
+`media::picture_role` backdrop/subject sorting, Displace, Liquid, Auto Cut-out;
+the user dislikes the CRT/VHS scene and predictable loops: keep it out). Next up: **M6 part 2**: the user
 reviews the signature Looks pitch, then Looks + Look DNA. Ask the user which scene
 is the "round bubbling sharp" one they liked before making new scenes. No Twitch.
 

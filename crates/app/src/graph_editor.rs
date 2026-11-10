@@ -3261,7 +3261,8 @@ impl Editor {
             }
             MenuAction::Template(id) => {
                 match nodes::templates::build(id, c.library, &c.demo_media) {
-                    Ok((g, _)) => {
+                    Ok(built) => {
+                        let g = built.graph;
                         let clip = Clip {
                             nodes: g.nodes().to_vec(),
                             links: g.links().to_vec(),
@@ -3272,7 +3273,12 @@ impl Editor {
                             self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
                         }
                         if let Some(t) = nodes::templates::find(id) {
-                            self.say(ui, format!("{}: {}", t.name, t.note));
+                            let msg = if built.summary.is_empty() {
+                                format!("{}: {}", t.name, t.note)
+                            } else {
+                                format!("{}: {} {}", t.name, built.summary, t.note)
+                            };
+                            self.say(ui, msg);
                         }
                     }
                     Err(e) => self.say(ui, e),

@@ -2,6 +2,24 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M6 part 1b: templates that weave your media together
+- **Your media, woven together** (new first template): the app looks at your
+  pictures and sorts them into **backdrops** (busy photos that fill the screen) and
+  **subjects** (a logo, a product, a person on a plain wall, see-through PNGs).
+  Backdrops bend along a kaleidoscope that moves with the music; subjects are cut
+  out and float on top, rippling on the kick. The message says what it found.
+- New nodes: **Displace** (one picture bends another), **Liquid** (bass wobble +
+  a ripple on every kick), **Auto Cut-out** (removes a plain background by itself).
+- **Switch**: Order can be *Random (never the same twice)*, and the transition
+  *Mix it up* picks a different one each time.
+- **Peak time** is less predictable: random order, changes on section changes and
+  drops as well as every 16 bars, mixed transitions, a liquid wobble.
+- **Warm-up** is no longer a disco fade: one slow aurora, bent by a kaleidoscope,
+  with trails and a gentle sway.
+- The retro CRT / VHS scene is no longer used in any template.
+- Fix: **Transform** kept nothing see-through, so a cut-out logo covered everything
+  behind it in black. Its "Black" edge option is now "Empty (see-through)".
+
 ## 2026-11-10 — v2 M6 part 1: templates (DJ sets), Switch node, real icons
 - **Templates** (right-click the graph → Templates (DJ sets)): eight ready-made sets
   that change with the music: Peak time, Warm-up, Your clips cut to the beat,

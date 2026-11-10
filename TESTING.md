@@ -327,6 +327,25 @@ Best done on a PC (or Windows user account) that has never built the app.
       Getting started steps in the Inspector.
 - [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
+## v2 M6 part 1b – Woven templates, backdrops and subjects
+
+Play music (Sources → Open song… or Computer audio) for all of these.
+- [ ] Media → Import… a logo on a plain (e.g. white) background and two busy photos.
+      Right-click the graph → Templates → **Your media, woven together**. The
+      message says "Found 2 backdrop pictures, 1 subject to cut out".
+- [ ] The logo floats in the middle with **no white box** round it, and punches on
+      the kick. The photo behind it bends and swells with the music.
+- [ ] The photos behind change every 8 bars or on a section change, with a slow
+      dissolve, in a random order.
+- [ ] Without imported media the template still works (a stand-in scene, a note
+      saying to import pictures).
+- [ ] **Peak time**: scenes change at musical moments (new sections, drops), not on a
+      fixed loop; the transition style varies. No retro TV / VHS scene.
+- [ ] **Warm-up**: one slow, flowing picture rather than fading between scenes.
+- [ ] Add nodes **Displace**, **Liquid** and **Auto Cut-out** from the right-click
+      menu; each has a "How to use" note in the Inspector.
+- [ ] A Transform with Edges = *Empty (see-through)* shows what's underneath round it.
+
 ## v2 M6 part 1 – Templates, Switch, icons
 
 Play music (Sources → Open song… or Computer audio) for all of these.

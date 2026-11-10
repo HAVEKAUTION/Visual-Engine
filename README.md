@@ -36,8 +36,10 @@ not just alongside it.
   Chroma (green screen) keys, a Motion Mask that follows movement, and a Key Mixer.
   Move, scale, turn or corner-pin a picture by dragging handles in the viewer.
   Right-click the graph → *Add compositing demo* to see it all at once.
-- **Templates for a DJ set.** Right-click the graph → *Templates*: Peak time, Warm-up,
-  your clips cut to the beat, a logo on the kick, glitch on the drop and more. A
+- **Templates for a DJ set.** Right-click the graph → *Templates*. *Your media,
+  woven together* sorts your pictures into backdrops and subjects by itself: the
+  backdrops bend with the music and the subjects are cut out and float on top.
+  Also Peak time, Warm-up, a logo on the kick, glitch on the drop and more. A
   **Switch** node changes between pictures on the beat with dissolves, wipes, slides
   or a zoom-through. Every template is ordinary nodes you can open up and change.
 - **Media.** Pictures, video files (loop, ping-pong, beat-locked, scrub, stutter) and
@@ -111,10 +113,12 @@ start the app (make a desktop shortcut to it if you like).
    and play music in Spotify, YouTube or a DJ app. The meters along the bottom start
    moving, and the BPM appears after a few seconds.
 2. **Start a set.** Right-click the empty grey area of the **Node Graph** (bottom)
-   → **Templates (DJ sets)** → **Peak time**. The viewer changes scene every 2 bars,
-   in time with the music. Try the others too (Ctrl+Z removes one).
+   → **Templates (DJ sets)** → **Peak time**. The scenes change on the music's
+   sections and drops. Try the others too (Ctrl+Z removes one).
 3. **Use your own pictures.** Click the **Media** tab → **Import…** and pick a few
-   pictures and videos. Add the demo again: it uses up to 2 videos and 3 pictures.
+   pictures and videos (a logo on a plain background, and some busy photos). Then
+   **Templates → Your media, woven together**: the logo is cut out and floats over
+   the photos, which bend with the music.
 4. **Change things.** Click any node in the graph. Its settings appear in the
    **Inspector** (right), with a short "How to use" note. Right-click a node to see
    everything you can do with it.

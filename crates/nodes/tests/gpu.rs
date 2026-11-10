@@ -861,3 +861,128 @@ fn compositing_demo_builds_and_draws() {
     assert!(g.nodes().iter().any(|n| n.kind == registry::CAMERA));
     assert_eq!(g.frames().len(), 6);
 }
+
+#[test]
+fn auto_cutout_removes_a_plain_background() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    // A red square on white.
+    let pic = picture_node(&mut g, "logo", |x, y| {
+        if (20..44).contains(&x) && (10..26).contains(&y) {
+            [220, 20, 30, 255]
+        } else {
+            [250, 250, 250, 255]
+        }
+    });
+    let cut = add(&mut g, &registry::shader_kind("mask_auto_cutout.wgsl"));
+    wire(&mut g, pic, cut, "input");
+    wire(&mut g, cut, out, "image");
+    s.settle(&g, out, &[pic]);
+    let px = s.frame(&g, out);
+    let corner = pixel(&px, 4, 4);
+    let middle = pixel(&px, SIZE.0 / 2, SIZE.1 / 2);
+    assert!(
+        corner[..3].iter().all(|v| *v < 10),
+        "background left: {corner:?}"
+    );
+    assert!(
+        middle[0] > 200 && middle[1] < 40,
+        "subject lost: {middle:?}"
+    );
+}
+
+#[test]
+fn transform_keeps_a_cut_out_see_through() {
+    // Cut-out logo → Transform (smaller, empty edges) → over green: the green
+    // must show round it, not black.
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let green = picture_node(&mut g, "tk_green", |_, _| [0, 200, 0, 255]);
+    let logo = picture_node(&mut g, "tk_logo", |x, y| {
+        if (20..44).contains(&x) && (10..26).contains(&y) {
+            [220, 20, 30, 255]
+        } else {
+            [250, 250, 250, 255]
+        }
+    });
+    let cut = add(&mut g, &registry::shader_kind("mask_auto_cutout.wgsl"));
+    let place = add(&mut g, &registry::shader_kind("fx_transform.wgsl"));
+    let merge = add(&mut g, &registry::shader_kind("fx_merge.wgsl"));
+    wire(&mut g, logo, cut, "input");
+    wire(&mut g, cut, place, "input");
+    set(&mut g, place, "zoom", graph::ParamValue::Float(0.5));
+    set(&mut g, place, "edges", graph::ParamValue::Choice(0));
+    set(&mut g, merge, "mode", graph::ParamValue::Choice(0)); // Normal
+    wire(&mut g, green, merge, "base");
+    wire(&mut g, place, merge, "top");
+    wire(&mut g, merge, out, "image");
+    s.settle(&g, out, &[green, logo]);
+    let px = s.frame(&g, out);
+    let corner = pixel(&px, 2, 2);
+    let middle = pixel(&px, SIZE.0 / 2, SIZE.1 / 2);
+    assert!(corner[1] > 150 && corner[0] < 40, "covered: {corner:?}");
+    assert!(middle[0] > 150 && middle[1] < 60, "logo lost: {middle:?}");
+}
+
+#[test]
+fn switch_moves_on_in_turn_and_at_random() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let red = picture_node(&mut g, "sw_red", |_, _| [255, 0, 0, 255]);
+    let blue = picture_node(&mut g, "sw_blue", |_, _| [0, 0, 255, 255]);
+    let sw = add(&mut g, &registry::shader_kind("fx_switch.wgsl"));
+    wire(&mut g, red, sw, "a");
+    wire(&mut g, blue, sw, "b");
+    wire(&mut g, sw, out, "image");
+    set(&mut g, sw, "count", graph::ParamValue::Choice(0)); // 2 pictures
+    set(&mut g, sw, "transition", graph::ParamValue::Choice(0)); // cut
+    s.settle(&g, out, &[red, blue]);
+    let mid = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
+    assert!(mid(&s.frame(&g, out))[0] > 240, "starts on picture 1");
+    set(&mut g, sw, "show", graph::ParamValue::Float(1.0));
+    s.frame(&g, out);
+    assert!(mid(&s.frame(&g, out))[2] > 240, "in turn: picture 2");
+    // Random never repeats: with two pictures every change flips.
+    set(&mut g, sw, "order", graph::ParamValue::Choice(1));
+    for (k, show) in [0.3f32, 0.6, 0.9].into_iter().enumerate() {
+        let before = mid(&s.frame(&g, out));
+        set(&mut g, sw, "show", graph::ParamValue::Float(show));
+        s.frame(&g, out);
+        let after = mid(&s.frame(&g, out));
+        assert_ne!(
+            before[0] > 128,
+            after[0] > 128,
+            "change {k} kept the same picture"
+        );
+    }
+}
+
+#[test]
+fn displace_and_liquid_leave_a_picture_alone_when_idle() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let pic = picture_node(&mut g, "idle", |x, _| {
+        if x < 32 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 255, 0, 255]
+        }
+    });
+    let disp = add(&mut g, &registry::shader_kind("fx_displace.wgsl"));
+    let liquid = add(&mut g, &registry::shader_kind("fx_liquid.wgsl"));
+    set(&mut g, liquid, "wobble", graph::ParamValue::Float(0.0));
+    set(&mut g, liquid, "ripple", graph::ParamValue::Float(0.0));
+    wire(&mut g, pic, disp, "input");
+    wire(&mut g, disp, liquid, "input");
+    wire(&mut g, liquid, out, "image");
+    s.settle(&g, out, &[pic]);
+    let px = s.frame(&g, out);
+    let left = pixel(&px, SIZE.0 / 4, SIZE.1 / 2);
+    let right = pixel(&px, SIZE.0 * 3 / 4, SIZE.1 / 2);
+    assert!(left[0] > 240 && left[1] < 15, "{left:?}");
+    assert!(right[1] > 240 && right[0] < 15, "{right:?}");
+}

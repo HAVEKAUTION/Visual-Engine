@@ -17,12 +17,14 @@ mod camera;
 mod features;
 mod ffmpeg;
 mod picture;
+mod role;
 mod video;
 
 pub use camera::{CameraDevice, CameraInfo, CameraMode, CameraStream, cameras};
 pub use features::{Features, GRID_H, GRID_W, VIDEO_SIGNAL_NAMES, VideoSignals, features, hue_of};
 pub use ffmpeg::{FfmpegError, ffmpeg_path, ffprobe_path, have_ffmpeg};
 pub use picture::{Picture, load_image, thumbnail};
+pub use role::{PictureRole, picture_role, role_of};
 pub use video::{Quality, VideoInfo, VideoStream, probe};
 
 use std::collections::HashMap;

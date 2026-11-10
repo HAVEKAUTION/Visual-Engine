@@ -95,8 +95,17 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
         _ if shader == "fx_corner_pin.wgsl" => {
             "Drag the four corners in the viewer to pin the picture onto anything: a screen in a photo, a wall, a tilted card. The middle handle moves all four. Outside the corners is see-through, so put it on a layer (+ Layer on what's behind)."
         }
+        _ if shader == "fx_displace.wgsl" => {
+            "Picture = what gets bent (your photo or video). Shape = what bends it: plug a scene in (Kaleido Bloom, Aurora Drift…) and the picture flows along its lines, swelling on the kick. Try the three Styles; Take the shape's colour tints it."
+        }
+        _ if shader == "fx_liquid.wgsl" => {
+            "Put it after a photo or logo so it never sits still: Wobble churns with the bass, Kick ripple sends a ring out on every kick. Move the ripple centre onto a face or the middle of a logo."
+        }
+        _ if shader == "mask_auto_cutout.wgsl" => {
+            "Put it right after a picture with a plain background (a product shot, a logo, a person against a wall). It removes the edge colour by itself; raise Tolerance if some background is left, Softness for smoother edges. Then Add a layer on top of a scene."
+        }
         _ if shader == "fx_switch.wgsl" => {
-            "Plug up to four pictures in (scenes, videos, photos). To change on the beat: add a              Beat Trigger (Every 8 beats) → Counter (Steps = pictures used) → drag the              Counter's value onto Show. Pick a Transition and how many beats it takes.              Right-click the graph → Templates has sets built this way."
+            "Plug up to four pictures in (scenes, videos, photos). To change on the beat: add a Beat Trigger (Every 8 beats) → Counter (Steps = pictures used) → drag the Counter's value onto Show. Pick a Transition and how many beats it takes. Right-click the graph → Templates has sets built this way."
         }
         _ if shader == "fx_merge.wgsl" => {
             "Background below, Foreground on top, blended with the mode. For more than two \
