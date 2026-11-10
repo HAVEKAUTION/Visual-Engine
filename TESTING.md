@@ -316,6 +316,52 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M4 part 2 – Cameras, video signals, sync
+
+Run: `cargo run --release -p app` (close any running copy first)
+
+**Camera**
+- [ ] Left panel → PICTURES & VIDEOS → **Cameras** lists your webcam. Drag it into
+      the graph (or double-click it). A Camera node appears, already showing you.
+- [ ] Wire it into Program Out. Mirror is on, so raising your right hand raises the
+      hand on the right of the picture.
+- [ ] Inspector → **Size** and the fps box: switch to 640 × 480. The picture
+      changes size within a second or two. "Automatic" goes back.
+- [ ] The grey line under it shows the camera, the real fps and "delay ≈ … ms".
+      In a dark room the fps drops (the camera exposes longer); add light and it rises.
+- [ ] Unplug the camera: after a moment the node shows ⚠ and goes black; the app
+      keeps running. Plug it back in, press ⟳ next to the camera name: it comes back.
+
+**Video signals: wave at your webcam**
+- [ ] Select the Camera node: under VIDEO SIGNALS, **Motion** jumps when you wave
+      and falls back when you keep still. "Where across / up" follow your hand.
+      Hold something colourful up: the Colour swatch turns that colour.
+- [ ] Add an **Audio Signal** node, pick **motion**, wire it into Transform's Zoom
+      (or any slider): waving now drives it.
+- [ ] A video file node shows the same meters (cuts and fast action = motion).
+- [ ] With two media nodes, only the first "feeds the video signals"; the other
+      says so. Switch the first one's "Feeds the video signals" off: the second takes over.
+
+**Stutter**
+- [ ] Play a song. Audio Trigger (Snare) → Video **Stutter**: on each snare the
+      clip repeats a quarter-beat slice 4 times, then carries on. Try a slice of 1
+      beat and 2 repeats.
+
+**Sound & picture sync**
+- [ ] Media tab → **🔊 Sound & picture sync…**. Pause the music, press **Start the
+      sync test**.
+- [ ] Step 1: a dot flashes in the middle of the viewer; press Space with it 8
+      times. Step 2: look away; press Space on each click 8 times.
+- [ ] It tells you the result and sets the offset. In the check, dot and click
+      should feel like one; nudge the slider if not. With Bluetooth headphones the
+      offset should come out clearly positive.
+- [ ] Set −100 ms with a song playing: the visuals hit slightly before the sound.
+      Set +100 ms: slightly after. The offset is remembered after a restart.
+
+Known gaps: the camera delay is an estimate (one frame + decoding + waiting); the
+sync test measures your whole chain. macOS camera support is written but untested
+(Windows tested with a Logitech C270). Camera sound is ignored.
+
 ## v2 M4 part 1 – Pictures and videos
 
 Needs ffmpeg for video (you have it). On another PC: Windows `winget install Gyan.FFmpeg`,

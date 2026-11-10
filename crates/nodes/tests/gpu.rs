@@ -387,4 +387,17 @@ fn video_node_scrubs_to_the_asked_position() {
         "{:?}",
         ev.media_info(v)
     );
+    // It feeds the video signals. Playing, the picture keeps changing:
+    // that is motion.
+    assert_eq!(ev.video_signal_source(), Some(v));
+    set(&mut g, v, "mode", graph::ParamValue::Choice(0));
+    let mut n = 0;
+    let (_, ev) = render_until(&g, out, |_| {
+        n += 1;
+        n > 90
+    })
+    .unwrap();
+    let [motion, _, _, bright, _] = ev.video_signals(v).unwrap();
+    assert!(motion > 0.2, "motion {motion}");
+    assert!(bright > 0.2, "brightness {bright}");
 }

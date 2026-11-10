@@ -9,13 +9,17 @@
 //! - Given the same graph, signals and time steps, the output is the same
 //!   (video frames arrive from a background decoder, so live playback shows
 //!   the nearest decoded frame; export will wait for exact frames).
-//! - Image / Video nodes read files through [`media::MediaLibrary`] and draw
-//!   them with a small built-in shader (fit / fill / stretch, mirror, scale).
+//! - Image / Video / Camera nodes read files and cameras through
+//!   [`media::MediaLibrary`] and draw them with a small built-in shader
+//!   (fit / fill / stretch, mirror, scale).
+//! - Media nodes also turn what they show into video signals (motion,
+//!   brightness, colour); the first one in the graph that "feeds the video
+//!   signals" puts them on the bus for everything else (one frame later).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use graph::{Graph, Node, NodeId, Param, ParamValue};
-use media::{MediaLibrary, Quality, Status};
+use media::{CameraMode, MediaLibrary, Quality, Status, VideoSignals};
 use render::{MEDIA_KEY, Renderer, ScenePipeline, Show};
 use scenes::{CompiledScene, ParamState, SceneLibrary, SignalState};
 use signals::modulation::{ModContext, Modulator, Wave, random_walk};
@@ -280,6 +284,9 @@ struct Play {
     mark: f64,
     jumps: u64,
     started: bool,
+    /// Stutter in progress: where the slice starts (0..1) and the beat it
+    /// started on.
+    stutter: Option<(f64, f64)>,
 }
 
 /// A Video node's settings this frame (after modulation).
@@ -294,6 +301,12 @@ struct VideoKnobs {
     restart: bool,
     jump: bool,
     hold: bool,
+    stutter: bool,
+    /// Beats per slice, and how many times it repeats.
+    stutter_len: f64,
+    stutter_repeats: f64,
+    /// Seconds per beat now.
+    beat_secs: f64,
 }
 
 fn hash01(n: u64) -> f64 {
@@ -319,6 +332,10 @@ impl Play {
             self.pos = r;
             self.mark = beats - r * lap;
         }
+        let display = |pos: f64| if pos > 1.0 { 2.0 - pos } else { pos };
+        if k.stutter {
+            self.stutter = Some((display(self.pos), beats));
+        }
         let rate = k.speed / clip_secs.max(1e-3);
         if !k.hold {
             match VIDEO_MODES.get(k.mode).copied().unwrap_or("Loop") {
@@ -331,11 +348,19 @@ impl Play {
                 _ => self.pos = (self.pos + dt * rate).rem_euclid(1.0),
             }
         }
-        if self.pos > 1.0 {
-            2.0 - self.pos // ping-pong on the way back
-        } else {
-            self.pos
+        // Stutter: repeat a short slice; the playhead keeps going underneath
+        // (like a DJ's slip mode), so it carries on where it would have been.
+        if let Some((from, at)) = self.stutter {
+            let len = k.stutter_len.max(1e-3);
+            let gone = beats - at;
+            if gone < 0.0 || gone >= len * k.stutter_repeats.max(1.0) {
+                self.stutter = None;
+            } else {
+                let secs = gone.rem_euclid(len) * k.beat_secs * k.speed.abs().max(0.05);
+                return (from + secs / clip_secs.max(1e-3)).clamp(0.0, 1.0);
+            }
         }
+        display(self.pos) // ping-pong comes back on the way down
     }
 }
 
@@ -432,6 +457,13 @@ pub struct Evaluator {
     play: HashMap<NodeId, Play>,
     /// What each media node is showing ("1920×1080 · 30 fps · frame 12 / 300").
     media_info: HashMap<NodeId, String>,
+    /// Each media node's video signals.
+    vsig: HashMap<NodeId, VideoSignals>,
+    /// The video signals on the bus, and which node they come from.
+    bus_video: [f32; 5],
+    bus_source: Option<NodeId>,
+    /// Sizes and rates each Camera node's camera offers.
+    camera_modes: HashMap<NodeId, std::sync::Arc<Vec<CameraMode>>>,
 }
 
 impl Evaluator {
@@ -448,7 +480,31 @@ impl Evaluator {
             media: MediaLibrary::new(),
             play: HashMap::new(),
             media_info: HashMap::new(),
+            vsig: HashMap::new(),
+            bus_video: IDLE_VIDEO,
+            bus_source: None,
+            camera_modes: HashMap::new(),
         }
+    }
+
+    /// A media node's video signals (motion, x, y, brightness, hue).
+    pub fn video_signals(&self, node: NodeId) -> Option<[f32; 5]> {
+        self.vsig.get(&node).map(|v| v.values())
+    }
+
+    /// The node whose video signals are on the bus.
+    pub fn video_signal_source(&self) -> Option<NodeId> {
+        self.bus_source
+    }
+
+    /// The sizes and rates a Camera node's camera offers (once it's open).
+    pub fn camera_modes(&self, node: NodeId) -> Option<&[CameraMode]> {
+        self.camera_modes.get(&node).map(|m| m.as_slice())
+    }
+
+    /// Close a camera so it opens again (after replugging it).
+    pub fn reload_camera(&mut self, name: &str) {
+        self.media.reload_camera(name);
     }
 
     /// A line about what an Image / Video node shows (size, rate, frame).
@@ -571,7 +627,11 @@ impl Evaluator {
         self.rt.retain(|id, _| graph.node(*id).is_some());
         self.sig.retain(|id, _| graph.node(*id).is_some());
         self.play.retain(|id, _| graph.node(*id).is_some());
+        self.vsig.retain(|id, _| graph.node(*id).is_some());
         self.media_info.clear();
+        // Video signals from last frame go on the bus first.
+        input.signals.set_video(self.bus_video);
+        let mut bus_video = None;
         let main: BTreeSet<NodeId> = graph.plan(targets).into_iter().collect();
         let all: Vec<NodeId> = targets.iter().chain(previews).copied().collect();
 
@@ -698,7 +758,7 @@ impl Evaluator {
                     // Media nodes: their file's picture goes in as the input.
                     let mut media_key = None;
                     if is_media {
-                        match self.media_frame(
+                        let result = self.media_frame(
                             graph,
                             node,
                             renderer,
@@ -706,7 +766,22 @@ impl Evaluator {
                             input.dt,
                             beats,
                             input.intensity,
-                        ) {
+                        );
+                        // Video signals from what it shows (nothing = fading out).
+                        let shown = result.as_ref().ok().and_then(|(_, p)| p.clone());
+                        let v = self
+                            .vsig
+                            .entry(id)
+                            .or_default()
+                            .update(shown.as_ref().map(|p| (p.id, &*p.features)), input.dt);
+                        let feeds = !matches!(
+                            node.param(SIGNALS_PARAM).map(|p| &p.value),
+                            Some(ParamValue::Bool(false))
+                        );
+                        if feeds && bus_video.is_none() {
+                            bus_video = Some((id, v));
+                        }
+                        match result.map(|(k, _)| k) {
                             Ok(Some(k)) => media_key = Some(k),
                             Ok(None) => {
                                 image.insert(id, None);
@@ -773,14 +848,17 @@ impl Evaluator {
         }
         self.pictures = image;
         self.media.end_frame();
+        self.bus_source = bus_video.map(|(id, _)| id);
+        self.bus_video = bus_video.map(|(_, v)| v).unwrap_or(IDLE_VIDEO);
         targets
             .first()
             .map(|t| self.picture(*t))
             .unwrap_or(Show::Black)
     }
 
-    /// Get the picture an Image / Video node shows this frame into the
-    /// renderer. `Ok(None)` = nothing to show yet (no file, still loading).
+    /// Get the picture an Image / Video / Camera node shows this frame into
+    /// the renderer, and that picture (for the video signals). `Ok(None)` =
+    /// nothing to show yet (no file, still loading).
     #[allow(clippy::too_many_arguments)]
     fn media_frame(
         &mut self,
@@ -791,26 +869,9 @@ impl Evaluator {
         dt: f32,
         beats: f64,
         intensity: f32,
-    ) -> Result<Option<u64>, String> {
+    ) -> Result<(Option<u64>, Option<media::Picture>), String> {
         let id = node.id;
         let key = MEDIA_KEY | self.key(id);
-        let path = match node.param(FILE_PARAM).map(|p| &p.value) {
-            Some(ParamValue::Text(t)) if !t.trim().is_empty() => std::path::PathBuf::from(t.trim()),
-            _ => {
-                self.media_info.insert(
-                    id,
-                    "No file yet: pick one in the Inspector, or drag one from the Media pool."
-                        .into(),
-                );
-                return Ok(None);
-            }
-        };
-        if !path.exists() {
-            return Err(format!(
-                "File not found: {}. Use \"Find file…\" in the Inspector to relink it.",
-                path.display()
-            ));
-        }
         // Keep showing the last picture while the next one loads.
         let keep = |renderer: &mut Renderer| {
             if renderer.media_picture(key).is_some() {
@@ -828,16 +889,86 @@ impl Evaluator {
             }
             Some(key)
         };
+        let values = &self.values;
+        let held = |port: &str| {
+            graph
+                .input_link(id, port)
+                .and_then(|l| values.get(&l.from.node).copied())
+                .unwrap_or(0.0)
+                > 0.5
+        };
+        if node.kind == CAMERA {
+            let text = |name: &str| match node.param(name).map(|p| &p.value) {
+                Some(ParamValue::Text(t)) => t.trim().to_string(),
+                _ => String::new(),
+            };
+            let name = text(CAMERA_PARAM);
+            let mode = CameraMode::parse(&text(CAMERA_MODE_PARAM));
+            let hold = held("hold");
+            let (cam, same) = self.media.camera(&name, mode);
+            let info = match cam.info() {
+                Status::Ready(i) => i,
+                Status::Loading => {
+                    self.media_info.insert(id, "Opening the camera…".into());
+                    return Ok((keep(renderer), None));
+                }
+                Status::Failed(e) => return Err(e),
+            };
+            let latest = cam.latest();
+            self.camera_modes.insert(id, info.modes.clone());
+            let waited = latest
+                .as_ref()
+                .map(|(_, t)| t.elapsed().as_secs_f32() * 1000.0)
+                .unwrap_or(0.0);
+            let mut line = format!(
+                "{} · {} {} · {:.1} fps · delay ≈ {:.0} ms",
+                info.name,
+                info.mode.size_label(),
+                info.format,
+                info.fps,
+                info.latency_ms(waited)
+            );
+            if !same {
+                line += " · another Camera node on this camera sets its size";
+            }
+            self.media_info.insert(id, line);
+            return Ok(match latest {
+                // Frozen: keep showing the last picture.
+                Some(_) if hold && renderer.media_picture(key).is_some() => {
+                    renderer.keep_media(key);
+                    (Some(key), None)
+                }
+                Some((pic, _)) => (show(renderer, &pic), Some(pic)),
+                None => (keep(renderer), None),
+            });
+        }
+        let path = match node.param(FILE_PARAM).map(|p| &p.value) {
+            Some(ParamValue::Text(t)) if !t.trim().is_empty() => std::path::PathBuf::from(t.trim()),
+            _ => {
+                self.media_info.insert(
+                    id,
+                    "No file yet: pick one in the Inspector, or drag one from the Media pool."
+                        .into(),
+                );
+                return Ok((None, None));
+            }
+        };
+        if !path.exists() {
+            return Err(format!(
+                "File not found: {}. Use \"Find file…\" in the Inspector to relink it.",
+                path.display()
+            ));
+        }
         if node.kind == IMAGE {
             return match self.media.image(&path) {
                 Status::Ready(pic) => {
                     self.media_info
                         .insert(id, format!("{} × {}", pic.width, pic.height));
-                    Ok(show(renderer, &pic))
+                    Ok((show(renderer, &pic), Some(pic)))
                 }
                 Status::Loading => {
                     self.media_info.insert(id, "Loading…".into());
-                    Ok(keep(renderer))
+                    Ok((keep(renderer), None))
                 }
                 Status::Failed(e) => Err(e),
             };
@@ -853,13 +984,8 @@ impl Evaluator {
             Some(ParamValue::Choice(c)) => *c,
             _ => 0,
         };
-        let input = |port: &str| {
-            graph
-                .input_link(id, port)
-                .and_then(|l| self.values.get(&l.from.node).copied())
-                .unwrap_or(0.0)
-                > 0.5
-        };
+        let input = held;
+        let bpm = ctx_bpm(ctx);
         let knobs = VideoKnobs {
             mode: choice("mode") as usize,
             speed: num("speed", 1.0),
@@ -871,6 +997,10 @@ impl Evaluator {
             restart: input("restart"),
             jump: input("jump"),
             hold: input("hold"),
+            stutter: input("stutter"),
+            stutter_len: num("stutter_len", 0.25),
+            stutter_repeats: num("stutter_repeats", 4.0).round(),
+            beat_secs: 60.0 / bpm,
         };
         for p in node.params.iter().filter(|p| p.def.is_modulatable()) {
             let v = effective_value(graph, id, p, ctx, &self.values, intensity);
@@ -881,7 +1011,7 @@ impl Evaluator {
             Status::Ready(i) => i,
             Status::Loading => {
                 self.media_info.insert(id, "Opening…".into());
-                return Ok(keep(renderer));
+                return Ok((keep(renderer), None));
             }
             Status::Failed(e) => return Err(e),
         };
@@ -916,10 +1046,19 @@ impl Evaluator {
             ),
         );
         Ok(match pic {
-            Some(p) => show(renderer, &p),
-            None => keep(renderer),
+            Some(p) => (show(renderer, &p), Some(p)),
+            None => (keep(renderer), None),
         })
     }
+}
+
+/// Video signals when no media node feeds them: still, centred, dark.
+const IDLE_VIDEO: [f32; 5] = [0.0, 0.5, 0.5, 0.0, 0.0];
+
+/// The tempo now (120 until one is found).
+fn ctx_bpm(ctx: &ModContext) -> f64 {
+    let b = (ctx.signal)("bpm").unwrap_or(0.0) as f64;
+    if b.is_finite() && b > 20.0 { b } else { 120.0 }
 }
 
 #[cfg(test)]
@@ -1168,6 +1307,10 @@ mod signal_tests {
             restart: false,
             jump: false,
             hold: false,
+            stutter: false,
+            stutter_len: 1.0,
+            stutter_repeats: 2.0,
+            beat_secs: 0.5,
         }
     }
 
@@ -1215,5 +1358,19 @@ mod signal_tests {
         q.step(&knobs("Loop"), 0.5, 0.0, 2.0, 1);
         assert_eq!(q.step(&k, 0.0, 2.0, 2.0, 1), a);
         assert!((0.0..1.0).contains(&a));
+    }
+
+    #[test]
+    fn stutter_repeats_a_slice_then_slips_back() {
+        // 2 s clip, 120 BPM: each step is a quarter second = half a beat.
+        let mut p = Play::default();
+        let mut k = knobs("Loop");
+        let mut out = Vec::new();
+        for i in 0..6 {
+            k.stutter = i == 1;
+            out.push(p.step(&k, 0.25, i as f64 * 0.5, 2.0, 1));
+        }
+        // Slice of 1 beat from 0.125, twice; then where it would have been.
+        assert_eq!(out, vec![0.125, 0.125, 0.25, 0.125, 0.25, 0.75]);
     }
 }

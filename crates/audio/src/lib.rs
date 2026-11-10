@@ -5,6 +5,7 @@
 //! [`feed`]). The audio callbacks follow the real-time rules: no allocation, no
 //! locks, no I/O and no logging.
 
+pub mod click;
 pub mod decode;
 pub mod feed;
 pub mod input;
@@ -17,6 +18,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use anyhow::Result;
 
+pub use click::ClickTrack;
 pub use feed::{FeedConsumer, FeedProducer};
 pub use input::{InputDevice, LiveInput, list_input_devices};
 pub use player::{FilePlayer, default_output_rate};

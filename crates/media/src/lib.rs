@@ -13,10 +13,14 @@
 //! The cost is a process per playing video and a restart when seeking far,
 //! which the frame cache hides for typical VJ loops (they fit entirely).
 
+mod camera;
+mod features;
 mod ffmpeg;
 mod picture;
 mod video;
 
+pub use camera::{CameraDevice, CameraInfo, CameraMode, CameraStream, cameras};
+pub use features::{Features, GRID_H, GRID_W, VIDEO_SIGNAL_NAMES, VideoSignals, features, hue_of};
 pub use ffmpeg::{FfmpegError, ffmpeg_path, ffprobe_path, have_ffmpeg};
 pub use picture::{Picture, load_image, thumbnail};
 pub use video::{Quality, VideoInfo, VideoStream, probe};
@@ -69,6 +73,7 @@ type Slot = Arc<Mutex<Status<Picture>>>;
 pub struct MediaLibrary {
     images: HashMap<PathBuf, (Slot, u64)>,
     videos: HashMap<(PathBuf, Quality), (VideoStream, u64)>,
+    cameras: HashMap<String, (CameraStream, u64)>,
     frame: u64,
 }
 
@@ -124,12 +129,43 @@ impl MediaLibrary {
         v
     }
 
+    /// A live camera (opens it on the first call). A camera can only be open
+    /// once, so every node on the same camera shares one stream: the first
+    /// node asking each frame picks the mode, and the second value is false
+    /// for later nodes asking for a different one.
+    pub fn camera(&mut self, name: &str, mode: Option<CameraMode>) -> (&CameraStream, bool) {
+        let frame = self.frame;
+        let reopen = match self.cameras.get(name) {
+            Some((c, used)) => c.mode() != mode && *used != frame,
+            None => true,
+        };
+        if reopen {
+            // Close anything that may hold the same device first ("" = the
+            // first camera, which could be this one).
+            self.cameras
+                .retain(|n, _| n != name && !n.is_empty() && !name.is_empty());
+            self.cameras
+                .insert(name.to_string(), (CameraStream::open(name, mode), frame));
+        }
+        let (c, used) = self.cameras.get_mut(name).expect("just inserted");
+        *used = frame;
+        let same = c.mode() == mode;
+        (c, same)
+    }
+
+    /// Close a camera so it opens again on the next use (after replugging).
+    pub fn reload_camera(&mut self, name: &str) {
+        self.cameras.remove(name);
+    }
+
     /// Call once per frame: closes media nobody asked for in a while.
     pub fn end_frame(&mut self) {
         self.frame += 1;
         let now = self.frame;
         self.images.retain(|_, (_, used)| now - *used < KEEP_FRAMES);
         self.videos.retain(|_, (_, used)| now - *used < KEEP_FRAMES);
+        // Cameras close quickly (their light goes off): about 1 s.
+        self.cameras.retain(|_, (_, used)| now - *used < 60);
     }
 
     /// Forget a file so it's read again (e.g. after relinking or editing it).

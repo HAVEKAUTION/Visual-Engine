@@ -44,6 +44,8 @@ struct Prefs {
     show_cost: bool,
     node_scale: f32,
     media_pool: Vec<std::path::PathBuf>,
+    /// Sound / picture offset (ms, + = pictures later).
+    av_offset_ms: f32,
 }
 
 impl Default for Prefs {
@@ -62,6 +64,7 @@ impl Default for Prefs {
             show_cost: true,
             node_scale: crate::graph_editor::DEFAULT_NODE_SCALE,
             media_pool: Vec::new(),
+            av_offset_ms: 0.0,
         }
     }
 }
@@ -101,6 +104,7 @@ pub struct VisualEngineApp {
     show_right: bool,
     show_strip: bool,
     left_tab: LeftTab,
+    sync: crate::av_sync::AvSync,
 }
 
 impl VisualEngineApp {
@@ -154,6 +158,7 @@ impl VisualEngineApp {
             show_right: prefs.show_right,
             show_strip: prefs.show_strip,
             left_tab: prefs.left_tab,
+            sync: crate::av_sync::AvSync::new(prefs.av_offset_ms),
         };
         app.scene.ws.viewer = prefs.viewer;
         app.scene.ws.pip = prefs.pip;
@@ -377,6 +382,25 @@ impl VisualEngineApp {
         if let (Some(secs), Source::File(player)) = (seek_to, self.engine.source()) {
             player.seek_secs(secs);
         }
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .button("🔊 Sound & picture sync…")
+                .on_hover_text(
+                    "If the visuals feel early or late (Bluetooth speakers, a projector),                      set an offset here, or let the tap test find it.",
+                )
+                .clicked()
+            {
+                self.sync.open = true;
+            }
+            if self.sync.offset_ms != 0.0 {
+                ui.label(
+                    RichText::new(format!("{:+.0} ms", self.sync.offset_ms))
+                        .small()
+                        .color(crate::theme::ACCENT),
+                );
+            }
+        });
 
         ui.add_space(18.0);
 
@@ -590,9 +614,11 @@ impl VisualEngineApp {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, CornerRadius::ZERO, PREVIEW_BG);
 
-        let signal_frame = self.signals.latest().clone();
+        let live = matches!(self.engine.source(), Source::Live(_));
+        let signal_frame = self.sync.frame(self.signals.latest(), live);
         self.scene.graph_visible = self.show_graph && !self.fullscreen;
         self.scene.paint(ui, frame, rect, &signal_frame);
+        self.sync.draw(&painter, rect);
         if self.scene.graph_mode && !self.fullscreen {
             self.viewer_overlays(ui, rect);
         }
@@ -1014,6 +1040,7 @@ impl eframe::App for VisualEngineApp {
             show_fps: self.show_fps,
             show_cost: ws.editor.show_cost,
             node_scale: ws.editor.node_scale,
+            av_offset_ms: self.sync.offset_ms,
             media_pool: ws.pool.items.clone(),
         };
         eframe::set_value(storage, PREFS_KEY, &prefs);
@@ -1032,6 +1059,12 @@ impl eframe::App for VisualEngineApp {
         // plus the performance keys (see perform.rs / H in the app).
         // (Ignored while typing in a text field.)
         let typing = ui.ctx().egui_wants_keyboard_input();
+        // The sync test takes Space as its tap key while it listens.
+        self.sync.capture_taps(ui.ctx());
+        if let Source::File(p) = self.engine.source() {
+            p.set_analysis_lead(self.sync.player_lead());
+        }
+        self.sync.window(ui.ctx());
         // Node-graph keys go first so the performance keys don't eat them
         // (Shift+Space = add node, Tab = hide/show the graph).
         if !typing && self.scene.graph_mode {
@@ -1088,7 +1121,9 @@ impl eframe::App for VisualEngineApp {
                         && self.show_graph
                         && let Some(p) = pointer.filter(|p| ws.editor.last_rect.contains(*p))
                     {
-                        ws.editor.pending_media.push((path, p));
+                        ws.editor
+                            .pending_media
+                            .push((crate::media_pool::MediaDrop::File(path), p));
                     }
                 }
                 None => {}

@@ -82,6 +82,13 @@ pub const SIGNAL_NAMES: &[&str] = &[
     "clock_bass",
     "clock_high",
     "clock_kick",
+    // Video (from the first Image / Video / Camera node that feeds them;
+    // see `media::VideoSignals`). Kept last so saved choices don't move.
+    "motion",
+    "motion_x",
+    "motion_y",
+    "brightness",
+    "video_hue",
 ];
 
 /// Number of scalars, rounded up to a multiple of 4 (the mel array that
@@ -287,6 +294,13 @@ impl SignalState {
         b[const { idx("clock_kick") }] += kick_env * dt;
 
         b[SCALARS_PADDED..PALETTE_OFFSET].copy_from_slice(&f.mel);
+    }
+
+    /// Set the video signals (motion, motion_x, motion_y, brightness,
+    /// video_hue).
+    pub fn set_video(&mut self, v: [f32; 5]) {
+        let at = const { idx("motion") };
+        self.block[at..at + 5].copy_from_slice(&v);
     }
 
     /// Set the five palette colours scenes see as `pal_color(0..4)`.

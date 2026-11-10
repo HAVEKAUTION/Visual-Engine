@@ -31,6 +31,13 @@ pub const RANDOM: &str = "random";
 pub const HOLD: &str = "hold";
 pub const IMAGE: &str = "image";
 pub const VIDEO: &str = "video";
+pub const CAMERA: &str = "camera";
+/// The Camera node's parameters: which camera, and its size / rate
+/// ("1280x720@30", empty = automatic).
+pub const CAMERA_PARAM: &str = "camera";
+pub const CAMERA_MODE_PARAM: &str = "camera_mode";
+/// Media nodes' "feed the video signals" switch.
+pub const SIGNALS_PARAM: &str = "signals";
 /// Video playback modes.
 pub const VIDEO_MODES: &[&str] = &["Loop", "Ping-pong", "Play once", "Beat-locked", "Scrub"];
 /// The media nodes' parameter holding the file path.
@@ -39,9 +46,9 @@ pub const FILE_PARAM: &str = "file";
 pub const MEDIA_SHADER: &str = "media_fit.wgsl";
 pub const MEDIA_SHADER_SRC: &str = include_str!("../shaders/media_fit.wgsl");
 
-/// Is this an Image or Video node?
+/// Is this an Image, Video or Camera node?
 pub fn is_media_kind(kind: &str) -> bool {
-    kind == IMAGE || kind == VIDEO
+    kind == IMAGE || kind == VIDEO || kind == CAMERA
 }
 /// Units for Hold's length.
 pub const HOLD_UNITS: &[&str] = &["beats", "bars", "seconds"];
@@ -238,14 +245,16 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
             value_out(),
             vec![num("steps", "Steps", 2.0, 64.0, 4.0)],
         ),
-        IMAGE | VIDEO => {
-            let file = ParamDef {
-                label: "File".into(),
+        IMAGE | VIDEO | CAMERA => {
+            let text = |name: &str, label: &str| ParamDef {
+                label: label.into(),
                 default: ParamValue::Text(String::new()),
                 min: 0.0,
                 max: 0.0,
-                ..ParamDef::float(FILE_PARAM, 0.0, 0.0, 0.0)
+                ..ParamDef::float(name, 0.0, 0.0, 0.0)
             };
+            let file = text(FILE_PARAM, "File");
+            let feeds = toggle(SIGNALS_PARAM, "Feeds the video signals", true);
             let place = [
                 pick(
                     "fit",
@@ -256,6 +265,23 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                 toggle("mirror", "Mirror", false),
                 num("scale", "Scale", 0.1, 4.0, 1.0),
             ];
+            if kind == CAMERA {
+                let mut place = place;
+                place[1] = toggle("mirror", "Mirror (like a mirror)", true);
+                return Some(spec(
+                    "Camera",
+                    vec![sig_in("hold", "Hold (freeze)")],
+                    vec![PortDef::new(IMAGE_OUT, PortType::Image)],
+                    [
+                        text(CAMERA_PARAM, "Camera"),
+                        text(CAMERA_MODE_PARAM, "Size and rate"),
+                    ]
+                    .into_iter()
+                    .chain(place)
+                    .chain([feeds])
+                    .collect(),
+                ));
+            }
             if kind == IMAGE {
                 return Some(spec(
                     "Image",
@@ -269,6 +295,7 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                 vec![
                     trig_in("restart", "Restart"),
                     trig_in("jump", "Jump (random)"),
+                    trig_in("stutter", "Stutter"),
                     sig_in("hold", "Hold (freeze)"),
                 ],
                 vec![PortDef::new(IMAGE_OUT, PortType::Image)],
@@ -280,6 +307,8 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                         num("position", "Position (scrub)", 0.0, 1.0, 0.0),
                         num("start", "Start at", 0.0, 1.0, 0.0),
                         num("end", "End at", 0.0, 1.0, 1.0),
+                        num("stutter_len", "Stutter slice (beats)", 0.0625, 4.0, 0.25),
+                        num("stutter_repeats", "Stutter repeats", 1.0, 32.0, 4.0),
                     ])
                     .chain(place)
                     .chain([pick(
@@ -288,6 +317,7 @@ pub fn builtin_spec(kind: &str) -> Option<NodeSpec> {
                         &["Low (640)", "Medium (960)", "High (1280)", "Full (1920)"],
                         2,
                     )])
+                    .chain([feeds])
                     .collect(),
             )
         }
@@ -450,7 +480,7 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
         (
             AUDIO_SIGNAL,
             Category::Signal,
-            "Any sound signal: bass, kick hits, loudness, beat phase… Wire it into a slider.",
+            "Any signal: bass, kick hits, loudness, beat phase, and video motion / brightness /              colour. Wire it into a slider.",
         ),
         (
             LFO,
@@ -520,7 +550,12 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
         (
             VIDEO,
             Category::Source,
-            "A video file: loop, ping-pong, lock it to the beat, scrub it with a signal,              jump or freeze it on triggers.",
+            "A video file: loop, ping-pong, lock it to the beat, scrub it with a signal,              jump, stutter or freeze it on triggers.",
+        ),
+        (
+            CAMERA,
+            Category::Source,
+            "A live camera (webcam, capture card). Its movement becomes signals too: wave              at it and watch Motion.",
         ),
         (PROGRAM_OUT, Category::Output, "The final picture."),
     ];

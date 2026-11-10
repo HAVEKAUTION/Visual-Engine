@@ -691,3 +691,24 @@ fn grouping_selected_nodes_nests_and_ungroups_cleanly() {
     }
     assert_eq!(g.groups(), empty.groups());
 }
+
+#[test]
+fn old_nodes_gain_new_plugs_and_settings() {
+    let mut g = Graph::new();
+    let mut spec = merge();
+    let n = g.new_node(&spec);
+    let mut old = n.clone();
+    // A newer version adds a plug and a setting.
+    spec.inputs
+        .insert(0, PortDef::new("extra", PortType::Signal).optional());
+    spec.params.push(ParamDef::float("depth", 0.0, 1.0, 0.25));
+    assert!(old.add_missing_from(&spec));
+    assert_eq!(old.inputs.first().map(|p| p.name.as_str()), Some("extra"));
+    assert_eq!(
+        old.inputs.last().map(|p| p.name.as_str()),
+        Some(crate::types::MASK_PORT)
+    );
+    assert!(old.param("depth").is_some());
+    // Already up to date: nothing to do.
+    assert!(!old.add_missing_from(&spec));
+}

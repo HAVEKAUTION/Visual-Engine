@@ -1,6 +1,7 @@
 //! Audio-Reactive Visual Engine: desktop app entry point.
 
 mod analysis_thread;
+mod av_sync;
 mod debug_panel;
 mod graph_editor;
 mod graph_view;

@@ -30,6 +30,10 @@ struct PlayerShared {
     volume: AtomicU32,
     /// Set by the stream's error callback.
     failed: AtomicBool,
+    /// Analyse this many output frames ahead of what's being played, so the
+    /// visuals can come early (for a projector or screen that shows them
+    /// late).
+    analysis_lead: AtomicU64,
 }
 
 /// Plays one [`Song`]. Dropping it stops playback.
@@ -69,6 +73,7 @@ impl FilePlayer {
             seek_to: AtomicU64::new(NO_SEEK),
             volume: AtomicU32::new(volume.clamp(0.0, 1.0).to_bits()),
             failed: AtomicBool::new(false),
+            analysis_lead: AtomicU64::new(0),
         });
 
         macro_rules! build {
@@ -176,6 +181,12 @@ impl FilePlayer {
     }
 
     /// True if the output device reported an error (e.g. it was unplugged).
+    /// Analyse `secs` ahead of what's heard (0 = in step).
+    pub fn set_analysis_lead(&self, secs: f64) {
+        let frames = (secs.clamp(0.0, 1.0) * self.song.output_rate as f64) as u64;
+        self.shared.analysis_lead.store(frames, Relaxed);
+    }
+
     pub fn has_failed(&self) -> bool {
         self.shared.failed.load(Relaxed)
     }
@@ -241,12 +252,20 @@ where
         }
 
         // Analysis feed: exactly the stretch of song that was just played
-        // (pre-volume), then silence for any frames that were silent.
+        // (pre-volume; shifted ahead by the lead), then silence for any
+        // frames that were silent. Past the end, silence keeps the pace.
         if pos > start {
-            let a = analysis_index(start, rate) as usize;
-            let b = (analysis_index(pos, rate) as usize).min(song.analysis.len());
-            if a < b {
-                push_slice(&mut producer, &song.analysis[a..b]);
+            let lead = shared.analysis_lead.load(Relaxed);
+            let a = analysis_index(start + lead, rate) as usize;
+            let b = analysis_index(pos + lead, rate) as usize;
+            let len = song.analysis.len();
+            let (ca, cb) = (a.min(len), b.min(len));
+            if ca < cb {
+                push_slice(&mut producer, &song.analysis[ca..cb]);
+            }
+            let past_end = (b - a) - (cb - ca);
+            if past_end > 0 {
+                push_silence(&mut producer, past_end);
             }
         }
         let silent = frames - (pos - start);

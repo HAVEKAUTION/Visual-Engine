@@ -12,7 +12,9 @@ use graph::{
     PublishedParam, Resolution,
 };
 use nodes::Evaluator;
-use nodes::registry::{self, AUDIO_SIGNAL, CatalogueEntry, FILE_PARAM, PROGRAM_OUT};
+use nodes::registry::{
+    self, AUDIO_SIGNAL, CAMERA_MODE_PARAM, CAMERA_PARAM, CatalogueEntry, FILE_PARAM, PROGRAM_OUT,
+};
 use scenes::SceneLibrary;
 use scenes::uniforms::SIGNAL_NAMES;
 use signals::modulation::Source;
@@ -110,7 +112,9 @@ impl Workspace {
         let restored = path.as_ref().and_then(|p| {
             let text = std::fs::read_to_string(p).ok()?;
             match Graph::from_ron(&text) {
-                Ok(g) => {
+                Ok(mut g) => {
+                    // Nodes saved by an older version get any new plugs and settings.
+                    g.upgrade_nodes(registry::builtin_spec);
                     notice = Some("Welcome back. Your graph from last time is restored.".into());
                     Some(g)
                 }
@@ -248,9 +252,9 @@ impl Workspace {
 
     /// The Media pool panel.
     pub fn pool_ui(&mut self, ui: &mut egui::Ui) {
-        if let Some(PoolAction::AddToGraph(p)) = self.pool.ui(ui) {
+        if let Some(PoolAction::AddToGraph(what)) = self.pool.ui(ui) {
             let at = self.editor.last_rect.center();
-            self.editor.pending_media.push((p, at));
+            self.editor.pending_media.push((what, at));
         }
     }
 
@@ -565,6 +569,206 @@ impl Workspace {
             self.param_ui(ui, id, p);
             ui.add_space(4.0);
         }
+        if registry::is_media_kind(&node.kind) {
+            self.video_signals_ui(ui, id);
+        }
+    }
+
+    /// A Camera node's camera, size and rate.
+    fn camera_ui(&mut self, ui: &mut egui::Ui, id: NodeId, current: &str) {
+        let names = self.pool.camera_names();
+        let mode_text = match self
+            .graph
+            .node(id)
+            .and_then(|n| n.param(CAMERA_MODE_PARAM))
+            .map(|p| &p.value)
+        {
+            Some(ParamValue::Text(t)) => t.clone(),
+            _ => String::new(),
+        };
+        let set_text = |this: &mut Self, param: &str, value: String| {
+            let _ = this.history.exec(
+                &mut this.graph,
+                Command::SetParam {
+                    node: id,
+                    param: param.into(),
+                    value: ParamValue::Text(value),
+                },
+            );
+        };
+        ui.horizontal(|ui| {
+            ui.label("Camera");
+            let shown = if current.is_empty() {
+                "First camera".to_string()
+            } else if names.iter().any(|n| n == current) {
+                current.to_string()
+            } else {
+                format!("{current} (not connected)")
+            };
+            let mut pick = None;
+            egui::ComboBox::from_id_salt(("camera", id.0))
+                .selected_text(shown)
+                .width(190.0)
+                .show_ui(ui, |ui| {
+                    if names.is_empty() {
+                        ui.label(RichText::new("No camera found").weak());
+                    }
+                    for n in &names {
+                        if ui.selectable_label(n == current, n).clicked() {
+                            pick = Some(n.clone());
+                        }
+                    }
+                });
+            if let Some(n) = pick {
+                set_text(self, CAMERA_PARAM, n);
+                // A different camera has different sizes.
+                set_text(self, CAMERA_MODE_PARAM, String::new());
+            }
+            if ui
+                .small_button("⟳")
+                .on_hover_text("Open the camera again and look for new ones (after replugging)")
+                .clicked()
+            {
+                self.eval.reload_camera(current);
+                self.pool.find_cameras();
+            }
+        });
+        let modes: Vec<media::CameraMode> = self
+            .eval
+            .camera_modes(id)
+            .map(|m| m.to_vec())
+            .unwrap_or_default();
+        if !modes.is_empty() {
+            let cur = media::CameraMode::parse(&mode_text);
+            let mut sizes: Vec<(u32, u32)> = modes.iter().map(|m| (m.width, m.height)).collect();
+            sizes.sort_by_key(|(w, h)| std::cmp::Reverse(w * h));
+            sizes.dedup();
+            let mut pick: Option<String> = None;
+            ui.horizontal(|ui| {
+                ui.label("Size");
+                let text = cur
+                    .map(|m| m.size_label())
+                    .unwrap_or_else(|| "Automatic".into());
+                egui::ComboBox::from_id_salt(("cam-size", id.0))
+                    .selected_text(text)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(cur.is_none(), "Automatic").clicked() {
+                            pick = Some(String::new());
+                        }
+                        for (w, h) in &sizes {
+                            let on = cur.is_some_and(|m| (m.width, m.height) == (*w, *h));
+                            if ui.selectable_label(on, format!("{w} × {h}")).clicked() {
+                                // Keep the rate if this size has it, else its fastest.
+                                let rates =
+                                    modes.iter().filter(|m| (m.width, m.height) == (*w, *h));
+                                let fps = cur
+                                    .map(|c| c.fps)
+                                    .filter(|f| rates.clone().any(|m| m.fps == *f))
+                                    .or_else(|| rates.map(|m| m.fps).max())
+                                    .unwrap_or(30);
+                                let m = media::CameraMode {
+                                    width: *w,
+                                    height: *h,
+                                    fps,
+                                };
+                                pick = Some(m.key());
+                            }
+                        }
+                    });
+                if let Some(c) = cur {
+                    let mut rates: Vec<u32> = modes
+                        .iter()
+                        .filter(|m| (m.width, m.height) == (c.width, c.height))
+                        .map(|m| m.fps)
+                        .collect();
+                    rates.sort_unstable_by(|a, b| b.cmp(a));
+                    rates.dedup();
+                    egui::ComboBox::from_id_salt(("cam-fps", id.0))
+                        .selected_text(format!("{} fps", c.fps))
+                        .show_ui(ui, |ui| {
+                            for f in rates {
+                                if ui
+                                    .selectable_label(f == c.fps, format!("{f} fps"))
+                                    .clicked()
+                                {
+                                    pick = Some(media::CameraMode { fps: f, ..c }.key());
+                                }
+                            }
+                        });
+                }
+            });
+            if let Some(m) = pick {
+                set_text(self, CAMERA_MODE_PARAM, m);
+            }
+        }
+        if let Some(info) = self.eval.media_info(id) {
+            ui.label(RichText::new(info).small().weak()).on_hover_text(
+                "Delay = one camera frame + decoding + waiting to be drawn (an estimate; \
+                 the sync test in the Media tab measures your whole setup). Cameras slow \
+                 down in the dark: more light gives more frames per second.",
+            );
+        }
+    }
+
+    /// Live meters of a media node's video signals, and whether they're on
+    /// the bus.
+    fn video_signals_ui(&self, ui: &mut egui::Ui, id: NodeId) {
+        let Some(v) = self.eval.video_signals(id) else {
+            return;
+        };
+        ui.separator();
+        ui.label(RichText::new("VIDEO SIGNALS").small().strong());
+        let feeds = !matches!(
+            self.graph
+                .node(id)
+                .and_then(|n| n.param(registry::SIGNALS_PARAM))
+                .map(|p| &p.value),
+            Some(ParamValue::Bool(false))
+        );
+        let note = match self.eval.video_signal_source() {
+            Some(s) if s == id => {
+                "On the signal bus: pick motion, brightness or video_hue in an Audio Signal node \
+                 (or a modulation) to drive any slider."
+            }
+            Some(_) if feeds => {
+                "Another media node feeds the bus (the first one in the graph does). Switch \
+                 its \"Feeds the video signals\" off to use this one."
+            }
+            _ => "Not on the signal bus (\"Feeds the video signals\" is off).",
+        };
+        ui.label(RichText::new(note).small().weak());
+        let rows = [
+            ("Motion", v[0], 4.0, "1 = typical movement for this source"),
+            ("Where across", v[1], 1.0, "0 = left, 1 = right"),
+            ("Where up", v[2], 1.0, "0 = bottom, 1 = top"),
+            ("Brightness", v[3], 2.0, "1 = typical for this source"),
+        ];
+        for (name, x, max, tip) in rows {
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    egui::vec2(86.0, 14.0),
+                    egui::Label::new(RichText::new(name).small()),
+                );
+                let (r, _) = ui.allocate_exact_size(egui::vec2(120.0, 8.0), egui::Sense::hover());
+                ui.painter().rect_filled(r, 3.0, Color32::from_gray(40));
+                let mut fill = r;
+                fill.set_width(r.width() * (x / max).clamp(0.0, 1.0));
+                ui.painter().rect_filled(fill, 3.0, ACCENT);
+                ui.label(RichText::new(format!("{x:.2}")).small().monospace())
+                    .on_hover_text(tip);
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add_sized(
+                egui::vec2(86.0, 14.0),
+                egui::Label::new(RichText::new("Colour").small()),
+            );
+            let (r, _) = ui.allocate_exact_size(egui::vec2(120.0, 8.0), egui::Sense::hover());
+            let c: Color32 = egui::ecolor::Hsva::new(v[4], 0.8, 0.9, 1.0).into();
+            ui.painter().rect_filled(r, 3.0, c);
+            ui.label(RichText::new(format!("{:.2}", v[4])).small().monospace())
+                .on_hover_text("video_hue: 0 = red, 0.33 = green, 0.67 = blue");
+        });
     }
 
     /// An Image / Video node's file: name, choose, relink, what's playing.
@@ -981,6 +1185,11 @@ impl Workspace {
             ParamValue::Text(t) if p.def.name == FILE_PARAM => {
                 self.file_ui(ui, id, t);
             }
+            ParamValue::Text(t) if p.def.name == CAMERA_PARAM => {
+                self.camera_ui(ui, id, t);
+            }
+            // Shown inside the camera row.
+            ParamValue::Text(_) if p.def.name == CAMERA_MODE_PARAM => {}
             ParamValue::Text(t) => {
                 let mut t = t.clone();
                 ui.horizontal(|ui| {

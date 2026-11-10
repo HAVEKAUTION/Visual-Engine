@@ -67,6 +67,35 @@ pub struct Node {
 }
 
 impl Node {
+    /// Bring a node saved by an older version up to date with its type:
+    /// plugs and settings added since are added (settings at their
+    /// defaults, in the spec's order). Nothing is removed or changed.
+    /// Returns true if anything was added.
+    pub fn add_missing_from(&mut self, spec: &NodeSpec) -> bool {
+        let mut changed = false;
+        for (i, port) in spec.inputs.iter().enumerate() {
+            if self.input(&port.name).is_none() {
+                // Before the automatic mask plug, which always comes last.
+                let at = self
+                    .inputs
+                    .iter()
+                    .position(|p| p.name == MASK_PORT)
+                    .unwrap_or(self.inputs.len())
+                    .min(i);
+                self.inputs.insert(at, port.clone());
+                changed = true;
+            }
+        }
+        for (i, def) in spec.params.iter().enumerate() {
+            if self.param(&def.name).is_none() {
+                let at = i.min(self.params.len());
+                self.params.insert(at, Param::new(def.clone()));
+                changed = true;
+            }
+        }
+        changed
+    }
+
     pub fn input(&self, name: &str) -> Option<&PortDef> {
         self.inputs.iter().find(|p| p.name == name)
     }
@@ -344,6 +373,21 @@ impl Graph {
 
     pub fn groups(&self) -> &[Group] {
         &self.groups
+    }
+
+    /// Bring nodes saved by an older version up to date (see
+    /// [`Node::add_missing_from`]); `spec_for` gives the current spec of a
+    /// kind, or `None` to leave it alone. Returns how many changed.
+    pub fn upgrade_nodes(&mut self, spec_for: impl Fn(&str) -> Option<NodeSpec>) -> usize {
+        let mut n = 0;
+        for node in &mut self.nodes {
+            if let Some(spec) = spec_for(&node.kind)
+                && node.add_missing_from(&spec)
+            {
+                n += 1;
+            }
+        }
+        n
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {

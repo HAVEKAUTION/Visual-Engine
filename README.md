@@ -28,9 +28,10 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
   Program/Selected/Wipe/PiP, live thumbnails, ten signal/trigger nodes, frames, snap,
   colour tags, S/P/L insert. Part 3: groups (fold into a box, nest) with published
   macro knobs, and GPU cost per node. M3 is done.
-- **v2 M4 – media**: in progress. Part 1: Image and Video nodes (ffmpeg decoding,
-  loop / ping-pong / beat-locked / scrub, jump / restart / freeze), Media pool with
-  drag-and-drop, relinking. Next: cameras, video signals, latency calibration.
+- **v2 M4 – media**: done. Image, Video and Camera nodes (ffmpeg decoding; loop /
+  ping-pong / beat-locked / scrub; jump / restart / stutter / freeze), Media pool
+  with drag-and-drop and relinking, live cameras (nokhwa), video signals on the bus
+  (motion, where, brightness, colour) and a sound & picture sync test.
 
 ## Running it
 

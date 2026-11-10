@@ -13,6 +13,8 @@ pub struct Picture {
     pub height: u32,
     pub rgba: Arc<Vec<u8>>,
     pub id: u64,
+    /// A tiny summary for the video signals (motion, brightness, colour).
+    pub features: Arc<crate::Features>,
 }
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -23,6 +25,7 @@ impl Picture {
         Self {
             width,
             height,
+            features: Arc::new(crate::features::features(width, height, &rgba)),
             rgba: Arc::new(rgba),
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         }

@@ -140,3 +140,158 @@ fn missing_video_fails_cleanly() {
     assert!(wait_for(|| matches!(v.info(), Status::Failed(_))));
     assert!(v.frame_near(0).is_none());
 }
+
+fn solid(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 4]) -> Picture {
+    let mut v = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            v.extend_from_slice(&f(x, y));
+        }
+    }
+    Picture::new(w, h, v)
+}
+
+#[test]
+fn features_measure_brightness_and_colour() {
+    let red = solid(64, 36, |_, _| [255, 0, 0, 255]);
+    assert!((red.features.luma - 0.2126).abs() < 1e-3);
+    assert!(hue_of(red.features.chroma) < 0.01 || hue_of(red.features.chroma) > 0.99);
+    let blue = solid(64, 36, |_, _| [0, 0, 255, 255]);
+    assert!((hue_of(blue.features.chroma) - 2.0 / 3.0).abs() < 0.01);
+    let grey = solid(64, 36, |_, _| [128, 128, 128, 255]);
+    assert!(grey.features.chroma[0].hypot(grey.features.chroma[1]) < 1e-4);
+    // Left half white: the grid sees it on the left only.
+    let half = solid(
+        64,
+        36,
+        |x, _| if x < 32 { [255; 4] } else { [0, 0, 0, 255] },
+    );
+    assert!(half.features.grid[0] > 0.99 && half.features.grid[GRID_W - 1] < 0.01);
+    assert!((half.features.luma - 0.5).abs() < 0.01);
+}
+
+#[test]
+fn video_signals_see_motion_where_it_happens() {
+    let dt = 1.0 / 30.0;
+    let mut s = VideoSignals::new();
+    // A still picture: no motion, brightness settles at 1 (typical).
+    let still = solid(64, 36, |_, _| [100, 100, 100, 255]);
+    for _ in 0..90 {
+        s.update(Some((still.id, &still.features)), dt);
+    }
+    assert!(s.motion < 0.05, "still motion {}", s.motion);
+    assert!(
+        (s.brightness - 1.0).abs() < 0.05,
+        "brightness {}",
+        s.brightness
+    );
+    // A box flickering in the top-right corner: motion, placed top right.
+    let mut pics = Vec::new();
+    for i in 0..60 {
+        let on = i % 2 == 0;
+        pics.push(solid(64, 36, move |x, y| {
+            if on && x >= 48 && y < 9 {
+                [255; 4]
+            } else {
+                [100, 100, 100, 255]
+            }
+        }));
+    }
+    for p in &pics {
+        s.update(Some((p.id, &p.features)), dt);
+    }
+    assert!(s.motion > 1.0, "moving motion {}", s.motion);
+    assert!(
+        s.motion_x > 0.7 && s.motion_y > 0.7,
+        "at {} {}",
+        s.motion_x,
+        s.motion_y
+    );
+    // Frozen (same picture keeps coming): motion fades away.
+    let last = pics.last().unwrap();
+    for _ in 0..60 {
+        s.update(Some((last.id, &last.features)), dt);
+    }
+    assert!(s.motion < 0.1, "frozen motion {}", s.motion);
+    // Same pictures, same time steps: same signals.
+    let run = || {
+        let mut v = VideoSignals::new();
+        let mut out = [0.0; 5];
+        for p in &pics {
+            out = v.update(Some((p.id, &p.features)), dt);
+        }
+        out
+    };
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn camera_modes_parse_and_default_sensibly() {
+    let m = CameraMode::parse("1280x720@30").unwrap();
+    assert_eq!((m.width, m.height, m.fps), (1280, 720, 30));
+    assert_eq!(m.key(), "1280x720@30");
+    assert!(CameraMode::parse("auto").is_none());
+    let mk = |w, h, fps| CameraMode {
+        width: w,
+        height: h,
+        fps,
+    };
+    let modes = vec![
+        mk(640, 480, 30),
+        mk(1280, 720, 30),
+        mk(1920, 1080, 5),
+        mk(3840, 2160, 30),
+    ];
+    assert_eq!(camera::choose_mode(&modes, None), Some(mk(1280, 720, 30)));
+    assert_eq!(
+        camera::choose_mode(&modes, Some(mk(1920, 1080, 5))),
+        Some(mk(1920, 1080, 5))
+    );
+    assert_eq!(
+        camera::choose_mode(&modes, Some(mk(800, 600, 30))),
+        Some(mk(640, 480, 30))
+    );
+}
+
+/// Needs a real camera: `cargo test -p media -- --ignored`.
+#[test]
+#[ignore]
+fn real_camera_delivers_frames() {
+    let list = cameras().unwrap();
+    eprintln!("cameras: {list:?}");
+    let Some(dev) = list.first() else { return };
+    let cam = CameraStream::open(&dev.name, None);
+    assert!(wait_for(|| cam.latest().is_some()), "{:?}", cam.info());
+    let Status::Ready(info) = cam.info() else {
+        panic!("{:?}", cam.info())
+    };
+    std::thread::sleep(Duration::from_secs(2));
+    let Status::Ready(info2) = cam.info() else {
+        panic!()
+    };
+    eprintln!(
+        "{} {} {} · {} modes · {:.1} fps · decode {:.1} ms · latency ≈ {:.0} ms",
+        info.name,
+        info.mode.key(),
+        info.format,
+        info.modes.len(),
+        info2.fps,
+        info2.decode_ms,
+        info2.latency_ms(0.0)
+    );
+    let (pic, _) = cam.latest().unwrap();
+    assert_eq!((pic.width, pic.height), (info.mode.width, info.mode.height));
+    drop(cam);
+    // Reopening straight away works (the old thread lets go).
+    let again = CameraStream::open(
+        &dev.name,
+        Some(CameraMode {
+            width: 640,
+            height: 480,
+            fps: 30,
+        }),
+    );
+    assert!(wait_for(|| again.latest().is_some()), "{:?}", again.info());
+    let (pic, _) = again.latest().unwrap();
+    assert_eq!((pic.width, pic.height), (640, 480));
+}

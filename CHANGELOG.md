@@ -2,6 +2,25 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M4 part 2: cameras, video signals, sound/picture sync
+- **Camera** node (Sources): any webcam or capture card, via nokhwa (Media
+  Foundation / AVFoundation / V4L2). Pick the camera, size and frame rate in the
+  Inspector; mirror on by default; Hold (freeze) input. Captured on its own thread,
+  newest frame wins; the node shows the real frame rate and an estimated delay.
+  Cameras are listed in the Media pool (drag or double-click to add).
+- **Video signals** on the signal bus: `motion`, `motion_x`, `motion_y`,
+  `brightness`, `video_hue`, normalised like the audio ones (1 = typical for this
+  source). They come from the first Image / Video / Camera node with "Feeds the video
+  signals" on. The Inspector shows live meters. Pick them in an Audio Signal node or
+  a modulation; shaders can read `sig.motion` etc.
+- Video node: **Stutter** trigger (repeats a slice of N beats, M times, then carries
+  on where it would have been).
+- **Sound & picture sync** (Media tab): one offset, −200 to +200 ms. + makes the
+  pictures wait (Bluetooth speakers); − makes them early (projectors): songs are
+  analysed ahead, live input moves the beat clock ahead. A tap-along test (flash,
+  then click) works the offset out.
+- Graphs saved by older versions get new plugs and settings when loaded.
+
 ## 2026-11-10 — v2 M4 part 1: pictures and videos
 - New `media` crate. Pictures (PNG, JPG, WebP, BMP, GIF, TIFF) load in the background.
   Videos are decoded by the ffmpeg program in a background process (H.264, H.265,

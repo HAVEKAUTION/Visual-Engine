@@ -1,6 +1,7 @@
 //! The Media pool: the pictures and videos you've brought in, with
-//! thumbnails. Drag one into the graph to make an Image / Video node.
-//! Files dropped on the window from Explorer / Finder land here too.
+//! thumbnails, and the cameras plugged in. Drag one into the graph to make
+//! an Image / Video / Camera node. Files dropped on the window from
+//! Explorer / Finder land here too.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,7 +14,11 @@ use crate::theme;
 
 /// What's being dragged from the pool (the graph accepts it).
 #[derive(Clone, Debug)]
-pub struct MediaDrop(pub PathBuf);
+pub enum MediaDrop {
+    File(PathBuf),
+    /// A camera, by name.
+    Camera(String),
+}
 
 enum Thumb {
     Loading,
@@ -23,9 +28,11 @@ enum Thumb {
 
 /// Something the pool asks the app to do.
 pub enum PoolAction {
-    /// Make a node for this file in the middle of the graph.
-    AddToGraph(PathBuf),
+    /// Make a node for this file / camera in the middle of the graph.
+    AddToGraph(MediaDrop),
 }
+
+type CameraList = Result<Vec<media::CameraDevice>, String>;
 
 pub struct MediaPool {
     pub items: Vec<PathBuf>,
@@ -33,6 +40,9 @@ pub struct MediaPool {
     tx: mpsc::Sender<(PathBuf, Result<media::Picture, String>)>,
     rx: mpsc::Receiver<(PathBuf, Result<media::Picture, String>)>,
     ffmpeg: Option<bool>,
+    /// Cameras found (None = not looked yet), and the search under way.
+    pub cameras: Option<CameraList>,
+    camera_search: Option<mpsc::Receiver<CameraList>>,
 }
 
 impl Default for MediaPool {
@@ -44,6 +54,8 @@ impl Default for MediaPool {
             tx,
             rx,
             ffmpeg: None,
+            cameras: None,
+            camera_search: None,
         }
     }
 }
@@ -69,6 +81,109 @@ impl MediaPool {
         for p in used {
             self.add(p);
         }
+    }
+
+    /// Look for cameras again (in the background).
+    pub fn find_cameras(&mut self) {
+        if self.camera_search.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new()
+            .name("find cameras".into())
+            .spawn(move || {
+                let _ = tx.send(media::cameras());
+            });
+        if spawned.is_ok() {
+            self.camera_search = Some(rx);
+        }
+    }
+
+    /// Camera names, once found.
+    pub fn camera_names(&mut self) -> Vec<String> {
+        if self.cameras.is_none() {
+            self.find_cameras();
+        }
+        match &self.cameras {
+            Some(Ok(list)) => list.iter().map(|c| c.name.clone()).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn poll_cameras(&mut self) {
+        if let Some(rx) = &self.camera_search {
+            match rx.try_recv() {
+                Ok(r) => {
+                    self.cameras = Some(r);
+                    self.camera_search = None;
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.camera_search = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
+    }
+
+    fn cameras_ui(&mut self, ui: &mut egui::Ui, action: &mut Option<PoolAction>) {
+        self.poll_cameras();
+        if self.cameras.is_none() && self.camera_search.is_none() {
+            self.find_cameras();
+        }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Cameras").small().strong());
+            if self.camera_search.is_some() {
+                ui.add(egui::Spinner::new().size(11.0));
+            } else if ui
+                .small_button("⟳")
+                .on_hover_text("Look for cameras again (after plugging one in)")
+                .clicked()
+            {
+                self.find_cameras();
+            }
+        });
+        match &self.cameras {
+            Some(Err(e)) => {
+                ui.label(RichText::new(e).small().color(theme::ERROR));
+            }
+            Some(Ok(list)) if list.is_empty() => {
+                ui.label(
+                    RichText::new("No camera found. Plug one in and press ⟳.")
+                        .small()
+                        .weak(),
+                );
+            }
+            Some(Ok(list)) => {
+                for cam in list.clone() {
+                    let resp = ui
+                        .add(
+                            egui::Label::new(format!("📷 {}", truncate(&cam.name, 30)))
+                                .sense(Sense::click_and_drag()),
+                        )
+                        .on_hover_text("Drag into the graph, or double-click to add it.");
+                    if resp.hovered() {
+                        ui.painter().rect_stroke(
+                            resp.rect.expand(2.0),
+                            4.0,
+                            egui::Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.5)),
+                            egui::StrokeKind::Outside,
+                        );
+                    }
+                    if resp.drag_started() {
+                        egui::DragAndDrop::set_payload(
+                            ui.ctx(),
+                            MediaDrop::Camera(cam.name.clone()),
+                        );
+                    }
+                    if resp.dragged() {
+                        carry_label(ui, &cam.name);
+                    }
+                    if resp.double_clicked() {
+                        *action = Some(PoolAction::AddToGraph(MediaDrop::Camera(cam.name)));
+                    }
+                }
+            }
+            None => {}
+        }
+        ui.add_space(4.0);
     }
 
     fn thumb(&mut self, path: &Path) -> &Thumb {
@@ -107,6 +222,7 @@ impl MediaPool {
             self.thumbs.insert(path, t);
         }
         let mut action = None;
+        self.cameras_ui(ui, &mut action);
         ui.horizontal(|ui| {
             if ui
                 .button("➕ Import…")
@@ -155,7 +271,7 @@ impl MediaPool {
                 .small()
                 .weak(),
             );
-            return None;
+            return action;
         }
         let mut remove = None;
         for path in self.items.clone() {
@@ -227,27 +343,17 @@ impl MediaPool {
                 );
             }
             if resp.drag_started() && !missing {
-                egui::DragAndDrop::set_payload(ui.ctx(), MediaDrop(path.clone()));
+                egui::DragAndDrop::set_payload(ui.ctx(), MediaDrop::File(path.clone()));
             }
             if resp.dragged() && !missing {
-                // Show what's being carried next to the pointer.
-                if let Some(p) = ui.ctx().pointer_interact_pos() {
-                    egui::Area::new(egui::Id::unique("pool-drag"))
-                        .order(egui::Order::Tooltip)
-                        .fixed_pos(p + vec2(12.0, 12.0))
-                        .show(ui.ctx(), |ui| {
-                            egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                ui.label(format!("➕ {name}"));
-                            });
-                        });
-                }
+                carry_label(ui, &name);
             }
             if resp.double_clicked() && !missing {
-                action = Some(PoolAction::AddToGraph(path.clone()));
+                action = Some(PoolAction::AddToGraph(MediaDrop::File(path.clone())));
             }
             resp.context_menu(|ui| {
                 if ui.button("Add to graph").clicked() {
-                    action = Some(PoolAction::AddToGraph(path.clone()));
+                    action = Some(PoolAction::AddToGraph(MediaDrop::File(path.clone())));
                     ui.close();
                 }
                 if ui.button("Remove from pool").clicked() {
@@ -261,6 +367,20 @@ impl MediaPool {
             self.thumbs.remove(&p);
         }
         action
+    }
+}
+
+/// Show what's being carried next to the pointer.
+fn carry_label(ui: &egui::Ui, name: &str) {
+    if let Some(p) = ui.ctx().pointer_interact_pos() {
+        egui::Area::new(egui::Id::unique("pool-drag"))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(p + vec2(12.0, 12.0))
+            .show(ui.ctx(), |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(format!("➕ {name}"));
+                });
+            });
     }
 }
 

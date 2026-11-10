@@ -451,7 +451,7 @@ pub struct Editor {
     pub node_scale: f32,
     /// Media files to turn into nodes, at a screen position (dropped from
     /// the pool or from the OS).
-    pub pending_media: Vec<(std::path::PathBuf, Pos2)>,
+    pub pending_media: Vec<(MediaDrop, Pos2)>,
     /// Where the graph was drawn last frame (screen).
     pub last_rect: Rect,
 }
@@ -1317,12 +1317,15 @@ impl Editor {
             && ui.input(|i| i.pointer.any_released())
             && let Some(drop) = egui::DragAndDrop::take_payload::<MediaDrop>(ui.ctx())
         {
-            self.pending_media.push((drop.0.clone(), p));
+            self.pending_media.push(((*drop).clone(), p));
         }
-        for (path, at) in std::mem::take(&mut self.pending_media) {
+        for (what, at) in std::mem::take(&mut self.pending_media) {
             let at = if rect.contains(at) { at } else { rect.center() };
             let gp = to_graph(self, at);
-            self.add_media_node(ui, &mut c, &path, gp);
+            match what {
+                MediaDrop::File(path) => self.add_media_node(ui, &mut c, &path, gp),
+                MediaDrop::Camera(name) => self.add_camera_node(ui, &mut c, &name, gp),
+            }
         }
 
         // ---- Drawing ----
@@ -2615,6 +2618,37 @@ impl Editor {
                 self.say(
                     ui,
                     "Added. Wire it into an effect or straight into Program Out.",
+                );
+            }
+            Err(e) => self.say(ui, e.to_string()),
+        }
+    }
+
+    /// A Camera node for the camera called `name`, centred at `at`.
+    fn add_camera_node(&mut self, ui: &egui::Ui, c: &mut Ctx, name: &str, at: Pos2) {
+        let Ok(spec) = registry::spec_for(registry::CAMERA, c.library) else {
+            return;
+        };
+        let mut n = c.graph.new_node(&spec);
+        n.pos = [
+            snap(at.x - NODE_W * 0.5, self.snap),
+            snap(at.y - HEADER_H * 0.5, self.snap),
+        ];
+        if let Some(p) = n
+            .params
+            .iter_mut()
+            .find(|p| p.def.name == registry::CAMERA_PARAM)
+        {
+            p.value = ParamValue::Text(name.to_string());
+        }
+        n.label = truncate(name, 20);
+        let id = n.id;
+        match c.history.exec(c.graph, Command::AddNode(Box::new(n))) {
+            Ok(()) => {
+                self.selected = BTreeSet::from([id]);
+                self.say(
+                    ui,
+                    "Camera added. Wave at it: its Motion is on the signal bus for any slider.",
                 );
             }
             Err(e) => self.say(ui, e.to_string()),
