@@ -275,10 +275,10 @@ impl AvSync {
                 .weak(),
             );
             if let Some(e) = &self.error {
-                ui.label(RichText::new(e).small().color(theme::ERROR));
+                ui.label(RichText::new(e).small().color(theme::error()));
             }
             if let Some(r) = &self.result {
-                ui.label(RichText::new(r).small().color(theme::ACCENT));
+                ui.label(RichText::new(r).small().color(theme::accent()));
             }
             if ui.button("▶ Start the sync test").clicked() {
                 match ClickTrack::start(INTERVAL) {
@@ -327,7 +327,7 @@ impl AvSync {
             }
             Step::Check => {
                 if let Some(r) = &self.result {
-                    ui.label(RichText::new(r).color(theme::ACCENT));
+                    ui.label(RichText::new(r).color(theme::accent()));
                 }
                 ui.label(
                     "Check it: the dot and the click should now feel like one. If not, move \

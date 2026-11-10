@@ -2,6 +2,22 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M3b part 2: themes, clearer tabs, bolder look (M3b done)
+- **Themes.** Toolbar → **Theme**: four built in (Ember, Graphite, Neon, High
+  contrast with bigger text). **Edit colours…** changes any of 14 colours, the text
+  size, roundness and spacing, live, then **Save** makes it one of *My themes*.
+- **Themes are text files** (`.ron`, colours as `"#RRGGBB"`) in the themes folder
+  (Theme → Open themes folder). Edit one in Notepad and the app updates when you
+  save. A typo keeps the last good look and says what's wrong. Share a theme by
+  sending the file; Theme → Import adds one.
+- **Clearer tabs.** The open tab is a card with an accent bar on top; the others are
+  quiet text that lights up under the mouse. Hovering a tab says what it's for.
+- **Bolder sections** (accent titles with a rule), and the node graph, viewer and
+  panels all follow the theme.
+- Fixes: the fps readout no longer covers the toolbar buttons with big text (it
+  shortens with "…"); the input list fits its panel; settings are now really kept
+  in the `VISUAL_ENGINE_DATA` folder (they weren't saved there before).
+
 ## 2026-11-10 — Easy install, README walkthrough, QA pass
 - **`setup.bat`** (double-click): installs the C++ Build Tools, Rust and ffmpeg
   through winget (skipping anything already there), then builds the app. The

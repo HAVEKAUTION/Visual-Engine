@@ -327,6 +327,25 @@ Best done on a PC (or Windows user account) that has never built the app.
       Getting started steps in the Inspector.
 - [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
+## v2 M3b part 2 – Themes, tabs, bolder look
+
+- [ ] Toolbar → **Theme** → **Neon**: the whole app turns violet and cyan, including
+      the node graph. **High contrast**: black, yellow, bigger text, and nothing
+      overlaps. **Ember** brings back the usual look.
+- [ ] Close and reopen the app: the theme you picked is still on.
+- [ ] Tabs: the open tab has a coloured bar on top and bright text; the others are
+      dimmer. Hovering any tab says what that panel is for.
+- [ ] **Theme → Edit colours…**: change Accent; buttons and headings change as you
+      drag. Move Text size: all panel text grows. **Undo my changes** puts it back.
+- [ ] Type a name and press **Save**. It appears under *My themes* in the Theme menu.
+- [ ] **Theme → Open themes folder**: File Explorer opens. Open your theme in
+      Notepad, change the `accent` colour (e.g. `"#FF0000"`), save: the app changes
+      within a second, without restarting.
+- [ ] Put a typo in the file and save: the look stays and Theme menu shows a red
+      message. Fix it and save: it updates again.
+- [ ] **Theme → Import a theme file…** with a `.ron` theme someone sent: it is added
+      to *My themes* and switched on.
+
 ## v2 M3b part 1 – Dockable panels, Sources panel, layouts
 
 - [ ] The toolbar shows **Layout: Build** and **Panels** at the top left.

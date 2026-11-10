@@ -120,12 +120,12 @@ fn handle(ui: &egui::Ui, at: Pos2, id: egui::Id, big: bool) -> egui::Response {
         at,
         r,
         if hot {
-            theme::ACCENT
+            theme::accent()
         } else {
             Color32::from_gray(235)
         },
     );
-    p.circle_stroke(at, r, Stroke::new(1.5, theme::ACCENT));
+    p.circle_stroke(at, r, Stroke::new(1.5, theme::accent()));
     resp
 }
 
@@ -134,7 +134,7 @@ fn outline(ui: &egui::Ui, pts: &[Pos2; 4]) {
     for i in 0..4 {
         let (a, b) = (pts[i], pts[(i + 1) % 4]);
         p.line_segment([a, b], Stroke::new(3.0, Color32::from_black_alpha(140)));
-        p.line_segment([a, b], Stroke::new(1.5, theme::ACCENT));
+        p.line_segment([a, b], Stroke::new(1.5, theme::accent()));
     }
 }
 

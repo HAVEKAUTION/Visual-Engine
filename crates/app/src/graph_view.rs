@@ -19,18 +19,17 @@ use scenes::SceneLibrary;
 use scenes::uniforms::SIGNAL_NAMES;
 use signals::modulation::Source;
 
-use crate::graph_editor::{self, ACCENT, Editor, GROUP_COLOUR, port_colour};
+use crate::graph_editor::{self, Editor, GROUP_COLOUR, port_colour};
 use crate::handles;
 use crate::media_pool::{MediaPool, PoolAction};
 use crate::mod_editor::{self, MOD_COLOR, SIGNAL_SOURCES};
 use crate::tips;
 
 const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
-const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 
 /// Where the autosave lives: `VISUAL_ENGINE_DATA`, else the usual per-user
 /// app-data folder.
-fn data_folder() -> Option<PathBuf> {
+pub(crate) fn data_folder() -> Option<PathBuf> {
     if let Ok(d) = std::env::var("VISUAL_ENGINE_DATA") {
         return Some(PathBuf::from(d));
     }
@@ -446,7 +445,7 @@ impl Workspace {
             egui::Frame::group(ui.style())
                 .fill(Color32::from_rgb(34, 30, 24))
                 .show(ui, |ui| {
-                    ui.label(RichText::new(n).color(ACCENT));
+                    ui.label(RichText::new(n).color(crate::theme::accent()));
                     close = ui.small_button("OK").clicked();
                 });
             if close {
@@ -466,7 +465,7 @@ impl Workspace {
                             "{n} media file{} can't be found",
                             if n == 1 { "" } else { "s" }
                         ))
-                        .color(ERROR_COLOR),
+                        .color(crate::theme::error()),
                     );
                     for p in self.missing.iter().take(4) {
                         ui.label(RichText::new(p.display().to_string()).small().weak());
@@ -480,7 +479,7 @@ impl Workspace {
                     );
                     pick_folder = ui.button("📂 Look in a folder…").clicked();
                     if let Some(note) = &self.relink_note {
-                        ui.label(RichText::new(note).small().color(ACCENT));
+                        ui.label(RichText::new(note).small().color(crate::theme::accent()));
                     }
                 });
             if pick_folder && let Some(dir) = rfd::FileDialog::new().pick_folder() {
@@ -565,7 +564,11 @@ impl Workspace {
             );
         }
         if let Some(e) = self.eval.errors.get(&id) {
-            ui.label(RichText::new(format!("⚠ {e}")).small().color(ERROR_COLOR));
+            ui.label(
+                RichText::new(format!("⚠ {e}"))
+                    .small()
+                    .color(crate::theme::error()),
+            );
         }
         ui.horizontal(|ui| {
             let mut on = !node.bypass;
@@ -1009,7 +1012,7 @@ impl Workspace {
                 ui.painter().rect_filled(r, 3.0, Color32::from_gray(40));
                 let mut fill = r;
                 fill.set_width(r.width() * (x / max).clamp(0.0, 1.0));
-                ui.painter().rect_filled(fill, 3.0, ACCENT);
+                ui.painter().rect_filled(fill, 3.0, crate::theme::accent());
                 ui.label(RichText::new(format!("{x:.2}")).small().monospace())
                     .on_hover_text(tip);
             });
@@ -1045,8 +1048,12 @@ impl Workspace {
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default()
             };
-            ui.label(RichText::new(name).color(if missing { ERROR_COLOR } else { Color32::WHITE }))
-                .on_hover_text(path.display().to_string());
+            ui.label(RichText::new(name).color(if missing {
+                crate::theme::error()
+            } else {
+                Color32::WHITE
+            }))
+            .on_hover_text(path.display().to_string());
         });
         ui.horizontal(|ui| {
             let text = if missing {
@@ -1655,7 +1662,7 @@ fn getting_started(ui: &mut egui::Ui) {
     );
     ui.add_space(6.0);
     for (title, body) in tips::GETTING_STARTED {
-        ui.label(RichText::new(*title).strong().color(ACCENT));
+        ui.label(RichText::new(*title).strong().color(crate::theme::accent()));
         ui.label(RichText::new(*body).small());
         ui.add_space(4.0);
     }

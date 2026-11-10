@@ -172,9 +172,11 @@ default **off**.
 
 **Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`** (plus the
 "v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
-built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. M3b part 1 (docking,
-layouts, Sources panel) done. Next up: **M3b part 2** (RON themes with live reload,
-bolder look, clearer tabs), then M6 (BUILD_STEPS_v2 Step 4). No Twitch.
+built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. M3b done (docking,
+layouts, Sources panel, themes in `app/src/theme.rs`: UI colours come from
+`theme::accent()` etc., never new hard-coded colours). Next up: **M6**
+(BUILD_STEPS_v2 Step 4), in parts. Ask the user which scene is the "round bubbling
+sharp" one they liked before making new scenes. No Twitch.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.

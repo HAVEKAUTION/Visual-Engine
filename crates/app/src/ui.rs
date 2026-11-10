@@ -18,9 +18,6 @@ use crate::rhythm_panel::RhythmView;
 use crate::scene_view::SceneView;
 use crate::theme;
 
-const PREVIEW_BG: Color32 = Color32::from_rgb(8, 8, 10);
-const PANEL_BG: Color32 = theme::PANEL;
-
 /// Layout and view settings remembered between sessions.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -39,6 +36,7 @@ struct Prefs {
     media_pool: Vec<std::path::PathBuf>,
     /// Sound / picture offset (ms, + = pictures later).
     av_offset_ms: f32,
+    theme: theme::Choice,
 }
 
 impl Default for Prefs {
@@ -56,13 +54,13 @@ impl Default for Prefs {
             node_scale: crate::graph_editor::DEFAULT_NODE_SCALE,
             media_pool: Vec::new(),
             av_offset_ms: 0.0,
+            theme: theme::Choice::default(),
         }
     }
 }
 
 const PREFS_KEY: &str = "workspace";
 const WAVE_COLOR: Color32 = Color32::from_rgb(90, 200, 255);
-const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 
 pub struct VisualEngineApp {
     engine: AudioEngine,
@@ -98,15 +96,16 @@ pub struct VisualEngineApp {
     /// Was the graph pane drawn this frame (not hidden or behind another tab)?
     graph_drawn: bool,
     sync: crate::av_sync::AvSync,
+    themes: theme::Themes,
 }
 
 impl VisualEngineApp {
     pub fn new(cc: &eframe::CreationContext<'_>, startup_song: Option<std::path::PathBuf>) -> Self {
-        theme::apply(&cc.egui_ctx);
         let prefs: Prefs = cc
             .storage
             .and_then(|s| eframe::get_value(s, PREFS_KEY))
             .unwrap_or_default();
+        let themes = theme::Themes::new(&cc.egui_ctx, prefs.theme.clone());
 
         let gpu_info = match &cc.wgpu_render_state {
             Some(rs) => {
@@ -154,6 +153,7 @@ impl VisualEngineApp {
             graph_shown: true,
             graph_drawn: true,
             sync: crate::av_sync::AvSync::new(prefs.av_offset_ms),
+            themes,
         };
         app.scene.ws.viewer = prefs.viewer;
         app.scene.ws.pip = prefs.pip;
@@ -294,17 +294,11 @@ impl VisualEngineApp {
         });
     }
 
-    fn heading(ui: &mut egui::Ui, text: &str) {
-        ui.add_space(4.0);
-        ui.label(RichText::new(text).strong().size(12.0).color(theme::ACCENT));
-        ui.separator();
-    }
-
     /// Where the sound comes from (song, live input, computer audio), the
     /// cameras, and sound / picture sync.
     fn sources_panel(&mut self, ui: &mut egui::Ui) {
         // ---------------- Song file ----------------
-        Self::heading(ui, "SONG");
+        theme::section(ui, "SONG");
         ui.horizontal(|ui| {
             let busy = self.loading.is_some();
             if ui
@@ -399,7 +393,7 @@ impl VisualEngineApp {
                 ui.label(
                     RichText::new(format!("{:+.0} ms", self.sync.offset_ms))
                         .small()
-                        .color(crate::theme::ACCENT),
+                        .color(crate::theme::accent()),
                 );
             }
         });
@@ -407,7 +401,7 @@ impl VisualEngineApp {
         ui.add_space(14.0);
 
         // ---------------- Live input ----------------
-        Self::heading(ui, "LIVE INPUT");
+        theme::section(ui, "LIVE INPUT");
         let selected_text = self
             .selected_input
             .and_then(|i| self.input_devices.get(i))
@@ -415,7 +409,7 @@ impl VisualEngineApp {
             .unwrap_or_else(|| "No input devices found".into());
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("input-device")
-                .width(ui.available_width() - 40.0)
+                .width((ui.available_width() - 64.0).max(80.0))
                 .selected_text(selected_text)
                 .show_ui(ui, |ui| {
                     for (i, d) in self.input_devices.iter().enumerate() {
@@ -487,20 +481,20 @@ impl VisualEngineApp {
 
         if let Some(err) = &self.error {
             ui.add_space(8.0);
-            ui.label(RichText::new(err).color(ERROR_COLOR));
+            ui.label(RichText::new(err).color(crate::theme::error()));
         }
 
         // ---------------- Cameras ----------------
         if self.scene.graph_mode {
             ui.add_space(14.0);
-            Self::heading(ui, "CAMERAS");
+            theme::section(ui, "CAMERAS");
             self.scene.ws.cameras_ui(ui);
         }
     }
 
     /// Tempo help, the events log and offline analysis.
     fn analysis_panel(&mut self, ui: &mut egui::Ui) {
-        Self::heading(ui, "TEMPO AND VIEW");
+        theme::section(ui, "TEMPO AND VIEW");
         let mut meters = self.shown(Pane::Meters);
         if ui.checkbox(&mut meters, "Show signal meters (M)").changed() {
             self.set_shown(Pane::Meters, meters);
@@ -569,7 +563,7 @@ impl VisualEngineApp {
                 }
             }
             Some(Err(e)) => {
-                ui.label(RichText::new(e).color(ERROR_COLOR));
+                ui.label(RichText::new(e).color(crate::theme::error()));
             }
             None => {}
         }
@@ -578,7 +572,7 @@ impl VisualEngineApp {
         }
 
         ui.add_space(14.0);
-        Self::heading(ui, "EVENTS");
+        theme::section(ui, "EVENTS");
         egui::ScrollArea::vertical()
             .max_height(170.0)
             .auto_shrink([false, true])
@@ -621,7 +615,7 @@ impl VisualEngineApp {
             self.toggle_fullscreen(ui.ctx());
         }
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, CornerRadius::ZERO, PREVIEW_BG);
+        painter.rect_filled(rect, CornerRadius::ZERO, crate::theme::viewer_bg());
 
         let live = matches!(self.engine.source(), Source::Live(_));
         let signal_frame = self.sync.frame(self.signals.latest(), live);
@@ -667,7 +661,7 @@ impl VisualEngineApp {
                 CornerRadius::same(3),
                 Color32::from_black_alpha(160),
             );
-            painter.galley(pos, galley, crate::graph_editor::ACCENT);
+            painter.galley(pos, galley, crate::theme::accent());
         }
         self.scene
             .perf
@@ -711,7 +705,7 @@ impl VisualEngineApp {
                     ws.wipe = ((p.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
                 }
                 let col = if r.hovered() || r.dragged() {
-                    theme::ACCENT
+                    theme::accent()
                 } else {
                     Color32::from_white_alpha(200)
                 };
@@ -742,7 +736,7 @@ impl VisualEngineApp {
                 painter.rect_stroke(
                     r.expand(1.0),
                     3.0,
-                    Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.7)),
+                    Stroke::new(1.0, theme::accent().gamma_multiply(0.7)),
                     egui::StrokeKind::Outside,
                 );
                 if let Some(n) = ws.graph.node(sel) {
@@ -778,11 +772,12 @@ impl VisualEngineApp {
                 RichText::new("VISUAL ENGINE")
                     .strong()
                     .size(12.5)
-                    .color(theme::ACCENT),
+                    .color(theme::accent()),
             );
             ui.add_space(14.0);
             self.layout_menu(ui);
             self.panels_menu(ui);
+            self.themes.menu(ui);
             ui.separator();
             if self.scene.graph_mode {
                 let ws = &mut self.scene.ws;
@@ -831,14 +826,19 @@ impl VisualEngineApp {
                     Some((_, total)) if self.scene.graph_mode => format!(" · GPU {total:.2} ms"),
                     _ => String::new(),
                 };
-                ui.label(
-                    RichText::new(format!(
-                        "{:.0} fps · {:.1} ms{gpu}",
-                        self.scene.fps, self.scene.frame_ms
-                    ))
-                    .small()
-                    .monospace()
-                    .weak(),
+                // Truncates (…) rather than overlapping the buttons when the
+                // window is narrow or the text is big.
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!(
+                            "{:.0} fps · {:.1} ms{gpu}",
+                            self.scene.fps, self.scene.frame_ms
+                        ))
+                        .small()
+                        .monospace()
+                        .weak(),
+                    )
+                    .truncate(),
                 )
                 .on_hover_text(
                     "Frames per second and time per frame. GPU = time the graphics card spent on the graph's nodes (each node shows its own share).",
@@ -906,7 +906,7 @@ impl VisualEngineApp {
         let cy = rect.center().y;
         let mut x = rect.left() + 10.0;
         let font = egui::FontId::proportional(10.5);
-        let weak = theme::TEXT_WEAK;
+        let weak = theme::text_weak();
         // Six bands.
         for (name, label) in [
             ("sub_fast", "SUB"),
@@ -953,8 +953,12 @@ impl VisualEngineApp {
         } else {
             "— BPM".into()
         };
-        let g = p.layout_no_wrap(text, egui::FontId::monospace(11.5), theme::TEXT);
-        p.galley(Pos2::new(x, cy - g.size().y * 0.5), g.clone(), theme::TEXT);
+        let g = p.layout_no_wrap(text, egui::FontId::monospace(11.5), theme::text());
+        p.galley(
+            Pos2::new(x, cy - g.size().y * 0.5),
+            g.clone(),
+            theme::text(),
+        );
         x += g.size().x + 12.0;
         // Beat dots (4 per bar), then bar and phrase progress.
         let bar_phase = sig("bar_phase").clamp(0.0, 0.9999);
@@ -963,7 +967,7 @@ impl VisualEngineApp {
         for i in 0..4 {
             let on = i == beat_in_bar;
             let col = if on {
-                lerp(Color32::from_gray(90), theme::ACCENT, beat_lit.max(0.35))
+                lerp(Color32::from_gray(90), theme::accent(), beat_lit.max(0.35))
             } else {
                 Color32::from_gray(48)
             };
@@ -978,7 +982,7 @@ impl VisualEngineApp {
             p.rect_filled(bar, 2.0, Color32::from_gray(34));
             let mut f = bar;
             f.set_width(bar.width() * v.clamp(0.0, 1.0));
-            p.rect_filled(f, 2.0, theme::ACCENT.gamma_multiply(0.8));
+            p.rect_filled(f, 2.0, theme::accent().gamma_multiply(0.8));
             x += 70.0;
         }
         let _ = x;
@@ -1098,6 +1102,7 @@ impl eframe::App for VisualEngineApp {
             show_cost: ws.editor.show_cost,
             node_scale: ws.editor.node_scale,
             av_offset_ms: self.sync.offset_ms,
+            theme: self.themes.choice.clone(),
             media_pool: ws.pool.items.clone(),
         };
         eframe::set_value(storage, PREFS_KEY, &prefs);
@@ -1122,6 +1127,8 @@ impl eframe::App for VisualEngineApp {
             p.set_analysis_lead(self.sync.player_lead());
         }
         self.sync.window(ui.ctx());
+        self.themes.poll(ui.ctx());
+        self.themes.editor(ui.ctx());
         // Node-graph keys go first so the performance keys don't eat them
         // (Shift+Space = add node, Tab = hide/show the graph).
         if !typing && self.scene.graph_mode {
@@ -1200,7 +1207,7 @@ impl eframe::App for VisualEngineApp {
                 egui::Align2::CENTER_CENTER,
                 "Drop pictures or videos (onto the graph to add them there), or a song",
                 egui::FontId::proportional(18.0),
-                crate::theme::ACCENT,
+                crate::theme::accent(),
             );
         }
         let (f11, esc, m, f) = ui.input(|i| {
@@ -1248,7 +1255,7 @@ impl eframe::App for VisualEngineApp {
             .exact_size(32.0)
             .frame(
                 egui::Frame::NONE
-                    .fill(theme::DEEP)
+                    .fill(theme::deep())
                     .inner_margin(egui::Margin::symmetric(8, 0)),
             )
             .show(ui, |ui| self.toolbar(ui));
@@ -1256,7 +1263,7 @@ impl eframe::App for VisualEngineApp {
         if self.show_strip {
             egui::Panel::bottom("strip")
                 .exact_size(26.0)
-                .frame(egui::Frame::NONE.fill(theme::DEEP))
+                .frame(egui::Frame::NONE.fill(theme::deep()))
                 .show(ui, |ui| self.signal_strip(ui));
         }
 
@@ -1316,13 +1323,13 @@ impl egui_tiles::Behavior<Pane> for Panes<'_> {
                 if app.scene.graph_mode {
                     app.graph_drawn = true;
                     egui::Frame::NONE
-                        .fill(crate::graph_editor::CANVAS_BG)
+                        .fill(crate::theme::canvas())
                         .show(ui, |ui| {
                             ui.set_min_size(ui.available_size());
                             app.scene.graph_panel(ui);
                         });
                 } else {
-                    padded(ui, PANEL_BG, &mut |ui| {
+                    padded(ui, crate::theme::panel(), &mut |ui| {
                         ui.label(
                             RichText::new(
                                 "Classic scenes are on. Switch the Inspector to Node graph \
@@ -1333,26 +1340,28 @@ impl egui_tiles::Behavior<Pane> for Panes<'_> {
                     });
                 }
             }
-            Pane::Inspector => padded(ui, PANEL_BG, &mut |ui| app.scene.controls(ui)),
-            Pane::Sources => padded(ui, PANEL_BG, &mut |ui| app.sources_panel(ui)),
-            Pane::Media => padded(ui, PANEL_BG, &mut |ui| app.media_panel(ui)),
-            Pane::Looks => padded(ui, PANEL_BG, &mut |ui| app.looks_panel(ui)),
-            Pane::Analysis => padded(ui, PANEL_BG, &mut |ui| app.analysis_panel(ui)),
+            Pane::Inspector => padded(ui, crate::theme::panel(), &mut |ui| app.scene.controls(ui)),
+            Pane::Sources => padded(ui, crate::theme::panel(), &mut |ui| app.sources_panel(ui)),
+            Pane::Media => padded(ui, crate::theme::panel(), &mut |ui| app.media_panel(ui)),
+            Pane::Looks => padded(ui, crate::theme::panel(), &mut |ui| app.looks_panel(ui)),
+            Pane::Analysis => padded(ui, crate::theme::panel(), &mut |ui| app.analysis_panel(ui)),
             Pane::Meters => {
                 app.update_hop_rate(self.signals.hop_index);
                 let rate = app.hops_per_sec;
                 let sf = self.signals;
-                egui::Frame::NONE.fill(PANEL_BG).show(ui, |ui| {
-                    ui.set_min_size(ui.available_size());
-                    debug_panel::show(ui, sf, rate, &app.rhythm_view);
-                });
+                egui::Frame::NONE
+                    .fill(crate::theme::panel())
+                    .show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        debug_panel::show(ui, sf, rate, &app.rhythm_view);
+                    });
             }
         }
         egui_tiles::UiResponse::None
     }
 
     fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
-        theme::DEEP
+        theme::deep()
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
@@ -1364,6 +1373,80 @@ impl egui_tiles::Behavior<Pane> for Panes<'_> {
 
     fn gap_width(&self, _style: &egui::Style) -> f32 {
         3.0
+    }
+
+    fn tab_bar_height(&self, style: &egui::Style) -> f32 {
+        egui::TextStyle::Button.resolve(style).size + 16.0
+    }
+
+    fn resize_stroke(&self, _style: &egui::Style, state: egui_tiles::ResizeState) -> egui::Stroke {
+        match state {
+            egui_tiles::ResizeState::Idle => egui::Stroke::new(3.0, theme::deep()),
+            egui_tiles::ResizeState::Hovering => egui::Stroke::new(3.0, theme::line()),
+            egui_tiles::ResizeState::Dragging => egui::Stroke::new(3.0, theme::accent()),
+        }
+    }
+
+    /// Tabs: the open one is a raised card with an accent bar on top and
+    /// bright text; the others are quiet text that lights up under the mouse.
+    /// Hovering a tab says what the panel is for.
+    fn tab_ui(
+        &mut self,
+        tiles: &mut egui_tiles::Tiles<Pane>,
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        tile_id: egui_tiles::TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Response {
+        let (title, hint) = match tiles.get(tile_id) {
+            Some(egui_tiles::Tile::Pane(p)) => (p.title(), p.hint()),
+            _ => ("", ""),
+        };
+        let font = egui::TextStyle::Button.resolve(ui.style());
+        let width = ui.fonts_mut(|f| {
+            f.layout_no_wrap(title.to_string(), font.clone(), Color32::WHITE)
+                .size()
+                .x
+        }) + 20.0;
+        let (_, rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
+        let resp = ui
+            .interact(rect, id, egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        resp.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, state.active, title)
+        });
+        if ui.is_rect_visible(rect) && !state.is_being_dragged {
+            let p = ui.painter();
+            let r = theme::current().roundness.clamp(0.0, 12.0) as u8;
+            let top = CornerRadius {
+                nw: r,
+                ne: r,
+                sw: 0,
+                se: 0,
+            };
+            let colour = if state.active {
+                p.rect_filled(rect.shrink2(egui::vec2(1.0, 0.0)), top, theme::panel());
+                let bar = egui::Rect::from_min_max(
+                    rect.left_top() + egui::vec2(1.0, 0.0),
+                    egui::pos2(rect.right() - 1.0, rect.top() + 3.0),
+                );
+                p.rect_filled(bar, top, theme::accent());
+                theme::text()
+            } else if resp.hovered() {
+                p.rect_filled(rect.shrink2(egui::vec2(2.0, 4.0)), r, theme::raised());
+                theme::text()
+            } else {
+                theme::text_weak()
+            };
+            let galley = p.layout_no_wrap(title.to_string(), font, colour);
+            let pos = rect.center() - galley.size() / 2.0 + egui::vec2(0.0, 1.0);
+            p.galley(pos, galley, colour);
+        }
+        if hint.is_empty() || resp.dragged() {
+            resp
+        } else {
+            resp.on_hover_text(hint)
+        }
     }
 }
 

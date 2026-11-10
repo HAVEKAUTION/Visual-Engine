@@ -209,6 +209,9 @@ it does.
   on an edge to split. Drag the gaps to resize. Your arrangement is remembered.
 - **Layout** (top left) switches between Build, Perform and Stream, or resets.
   **Panels** shows or hides any panel. If one is missing, tick it there.
+- **Theme** changes the look: Ember, Graphite, Neon or High contrast (bigger text),
+  or **Edit colours…** to make your own. Themes are small text files you can share
+  (Theme → Open themes folder / Import).
 - **Sound source:** the **Sources** tab on the left: **Open song…**, the live
   inputs, **Computer audio**, and your cameras.
 - **Settings for a node:** click the node in the graph. Its settings appear in the
@@ -228,23 +231,22 @@ Done:
 - the node graph and workspace;
 - media (pictures, video, cameras);
 - compositing: blend modes, the Layer Mixer, masks and keys, Transform and Corner
-  Pin with handles in the viewer, and a demo project.
+  Pin with handles in the viewer, and a demo project;
+- the workspace: dockable panels, layouts, a Sources panel and themes.
 
 Next, roughly in order:
 
-1. **UI pass, part 2.** User themes and bolder Resolve-style looks. (Part 1, dockable
-   panels, saved layouts and the Sources panel, is done.)
-2. **Looks and the full node library.** Signature looks you can mutate and breed,
+1. **Looks and the full node library.** Signature looks you can mutate and breed,
    ready-made node layouts in the right-click menu, more original effects (datamosh,
    liquify, a symmetry engine), text, depth, and a free pack of starter pictures.
-3. **Perform mode.** Macros, MIDI learn and controller support, an automatic
+2. **Perform mode.** Macros, MIDI learn and controller support, an automatic
    "Director", a photosensitivity safety guard, and a panic key.
-4. **Outputs.** Second screen and projectors (with warping), Spout / Syphon / NDI for
+3. **Outputs.** Second screen and projectors (with warping), Spout / Syphon / NDI for
    OBS, and a live desktop wallpaper mode.
-5. **Video intelligence.** Motion tracking, and keying people out without a green screen.
-6. **Export.** 4K, vertical and square video and loops, with the song or the live
+4. **Video intelligence.** Motion tracking, and keying people out without a green screen.
+5. **Export.** 4K, vertical and square video and loops, with the song or the live
    audio, plus Ableton Link.
-7. **Tutorial** inside the app.
+6. **Tutorial** inside the app.
 
 Ideas for later: stems (separate drums / bass / vocals as their own signals) and
 sampling, lyric tracks, DMX lighting, OSC, a phone remote, and sharing Looks.

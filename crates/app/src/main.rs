@@ -58,7 +58,8 @@ fn main() -> eframe::Result {
         wgpu_options: wgpu_options(),
         // A custom data folder (tests, a second setup) keeps the layout and
         // settings there too, not just the graph.
-        persistence_path: std::env::var_os("VISUAL_ENGINE_DATA").map(std::path::PathBuf::from),
+        persistence_path: std::env::var_os("VISUAL_ENGINE_DATA")
+            .map(|d| std::path::PathBuf::from(d).join("app.ron")),
         ..Default::default()
     };
 

@@ -29,16 +29,6 @@ use serde::{Deserialize, Serialize};
 use crate::media_pool::MediaDrop;
 use crate::theme;
 
-pub const ACCENT: Color32 = theme::ACCENT;
-pub const CANVAS_BG: Color32 = theme::DEEP;
-const GRID_DOT: Color32 = Color32::from_rgb(36, 36, 42);
-const GRID_DOT_MAJOR: Color32 = Color32::from_rgb(50, 50, 58);
-const NODE_BG: Color32 = Color32::from_rgb(36, 36, 42);
-const NODE_HEADER: Color32 = Color32::from_rgb(48, 48, 56);
-const TEXT: Color32 = theme::TEXT;
-const TEXT_DIM: Color32 = Color32::from_gray(135);
-const ERROR: Color32 = theme::ERROR;
-
 const NODE_W: f32 = 170.0;
 const HEADER_H: f32 = 24.0;
 const ROW_H: f32 = 18.0;
@@ -85,7 +75,7 @@ pub fn category_colour(c: Category) -> Color32 {
         Category::Mask => port_colour(PortType::Mask),
         Category::Signal => port_colour(PortType::Signal),
         Category::Trigger => port_colour(PortType::Trigger),
-        Category::Output => ACCENT,
+        Category::Output => theme::accent(),
     }
 }
 
@@ -507,7 +497,11 @@ pub fn add_items(
     how: AddHow,
 ) -> Option<Option<String>> {
     let mut pick = None;
-    ui.label(egui::RichText::new(how.hint()).small().color(TEXT_DIM));
+    ui.label(
+        egui::RichText::new(how.hint())
+            .small()
+            .color(theme::text_weak()),
+    );
     if ui.button("🔍 Search all…").clicked() {
         pick = Some(None);
     }
@@ -523,7 +517,7 @@ pub fn add_items(
             return;
         }
         ui.separator();
-        ui.label(egui::RichText::new(title).small().color(TEXT_DIM));
+        ui.label(egui::RichText::new(title).small().color(theme::text_weak()));
         for e in items {
             let text = egui::RichText::new(&e.label).color(category_colour(e.category));
             if ui.button(text).on_hover_text(&e.description).clicked() {
@@ -1517,7 +1511,7 @@ impl Editor {
         }
 
         // ---- Drawing ----
-        painter.rect_filled(rect, 0.0, CANVAS_BG);
+        painter.rect_filled(rect, 0.0, theme::canvas());
         let step = GRID * self.zoom;
         if step > 5.0 {
             let o = origin(self);
@@ -1532,7 +1526,11 @@ impl Editor {
                     painter.circle_filled(
                         pos2(x, y),
                         if major { 1.4 } else { 0.9 },
-                        if major { GRID_DOT_MAJOR } else { GRID_DOT },
+                        if major {
+                            theme::grid_major()
+                        } else {
+                            theme::grid()
+                        },
                     );
                     y += step;
                 }
@@ -1570,7 +1568,7 @@ impl Editor {
                 Align2::LEFT_CENTER,
                 &f.label,
                 FontId::proportional((13.0 * z).clamp(7.0, 22.0)),
-                TEXT,
+                theme::text(),
             );
             // Resize grip.
             let g = r.max - vec2(5.0, 5.0);
@@ -1597,9 +1595,9 @@ impl Editor {
                 r,
                 8.0,
                 if picked {
-                    Stroke::new(2.0, ACCENT)
+                    Stroke::new(2.0, theme::accent())
                 } else if all_selected {
-                    Stroke::new(1.5, ACCENT.gamma_multiply(0.6))
+                    Stroke::new(1.5, theme::accent().gamma_multiply(0.6))
                 } else {
                     Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.35))
                 },
@@ -1629,7 +1627,7 @@ impl Editor {
                 Align2::LEFT_CENTER,
                 format!("{}  ·  {} nodes", d.label, d.members.len()),
                 font,
-                TEXT,
+                theme::text(),
             );
             if self.show_cost
                 && let Some(g) = c.gpu
@@ -1774,8 +1772,13 @@ impl Editor {
         }
         if let (Drag::Box { start }, Some(p)) = (&self.drag, pointer) {
             let b = Rect::from_two_pos(*start, p);
-            painter.rect_filled(b, 2.0, ACCENT.gamma_multiply(0.08));
-            painter.rect_stroke(b, 2.0, Stroke::new(1.0, ACCENT), StrokeKind::Inside);
+            painter.rect_filled(b, 2.0, theme::accent().gamma_multiply(0.08));
+            painter.rect_stroke(
+                b,
+                2.0,
+                Stroke::new(1.0, theme::accent()),
+                StrokeKind::Inside,
+            );
         }
         if c.graph.nodes().is_empty() {
             painter.text(
@@ -1784,12 +1787,12 @@ impl Editor {
                 "An empty canvas. Right-click to add your first node,\n\
                  press Shift+Space to search, or right-click → Add starter graph.",
                 FontId::proportional(15.0),
-                TEXT_DIM,
+                theme::text_weak(),
             );
         }
         // Status line: messages, else a hint.
         let line = match &self.message {
-            Some((m, t)) if now - t < 4.0 => (m.clone(), ACCENT),
+            Some((m, t)) if now - t < 4.0 => (m.clone(), theme::accent()),
             _ => (
                 format!(
                     "Right-click: add · drag plug→plug: wire · drop a wire on empty space: add + wire · \
@@ -1800,7 +1803,7 @@ impl Editor {
                         " · snap off (G)"
                     }
                 ),
-                TEXT_DIM,
+                theme::text_weak(),
             ),
         };
         painter.text(
@@ -1815,7 +1818,7 @@ impl Editor {
             painter.rect_stroke(
                 rect.shrink(2.0),
                 6.0,
-                Stroke::new(2.0, ACCENT),
+                Stroke::new(2.0, theme::accent()),
                 StrokeKind::Inside,
             );
             painter.text(
@@ -1823,7 +1826,7 @@ impl Editor {
                 Align2::CENTER_TOP,
                 "Let go to add it to the graph",
                 FontId::proportional(14.0),
-                ACCENT,
+                theme::accent(),
             );
         }
         if self.show_help {
@@ -1863,7 +1866,7 @@ impl Editor {
         painter.rect_filled(
             r.translate(vec2(5.0, 5.0) * z),
             round,
-            lerp_colour(NODE_BG, GROUP_COLOUR, 0.08),
+            lerp_colour(theme::node(), GROUP_COLOUR, 0.08),
         );
         painter.rect_stroke(
             r.translate(vec2(5.0, 5.0) * z),
@@ -1871,7 +1874,7 @@ impl Editor {
             Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.25)),
             StrokeKind::Outside,
         );
-        painter.rect_filled(r, round, lerp_colour(NODE_BG, GROUP_COLOUR, 0.06));
+        painter.rect_filled(r, round, lerp_colour(theme::node(), GROUP_COLOUR, 0.06));
         let head = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H * z));
         painter.rect_filled(
             head,
@@ -1881,7 +1884,7 @@ impl Editor {
                 sw: 0,
                 se: 0,
             },
-            lerp_colour(NODE_HEADER, GROUP_COLOUR, 0.3),
+            lerp_colour(theme::node_header(), GROUP_COLOUR, 0.3),
         );
         let font = FontId::proportional((12.5 * z).clamp(6.0, 20.0));
         let small = FontId::proportional((11.0 * z).clamp(5.0, 18.0));
@@ -1897,18 +1900,18 @@ impl Editor {
             Align2::LEFT_CENTER,
             truncate(&b.label, 16),
             font,
-            TEXT,
+            theme::text(),
         );
         let errors = b.members.iter().any(|m| c.eval.errors.contains_key(m));
         let right = if errors {
-            Some(("⚠".to_string(), ERROR))
+            Some(("⚠".to_string(), theme::error()))
         } else if self.show_cost
             && let Some(g) = c.gpu
         {
             let ms: f32 = b.members.iter().filter_map(|m| g.get(m)).sum();
             (ms > 0.0).then(|| (format!("{ms:.2} ms"), cost_colour(ms)))
         } else {
-            Some((format!("{}", b.members.len()), TEXT_DIM))
+            Some((format!("{}", b.members.len()), theme::text_weak()))
         };
         if let Some((t, col)) = right {
             painter.text(
@@ -1929,7 +1932,7 @@ impl Editor {
                     Align2::LEFT_CENTER,
                     truncate(label, 13),
                     small.clone(),
-                    TEXT_DIM,
+                    theme::text_weak(),
                 );
             }
         }
@@ -1942,7 +1945,7 @@ impl Editor {
                     Align2::RIGHT_CENTER,
                     label,
                     small.clone(),
-                    TEXT_DIM,
+                    theme::text_weak(),
                 );
             }
         }
@@ -1996,7 +1999,7 @@ impl Editor {
                     Align2::RIGHT_BOTTOM,
                     value_text,
                     small.clone(),
-                    TEXT_DIM,
+                    theme::text_weak(),
                 );
             }
             if let Some(f) = frac {
@@ -2030,9 +2033,9 @@ impl Editor {
         let picked = self.focus_group == Some(b.id)
             || (!b.members.is_empty() && b.members.iter().all(|m| self.selected.contains(m)));
         let stroke = if picked {
-            Stroke::new(2.0, ACCENT)
+            Stroke::new(2.0, theme::accent())
         } else if errors {
-            Stroke::new(1.0, ERROR)
+            Stroke::new(1.0, theme::error())
         } else {
             Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.5))
         };
@@ -2073,9 +2076,9 @@ impl Editor {
             Color32::from_black_alpha(90),
         );
         let body = if n.colour.is_some() {
-            lerp_colour(NODE_BG, tag, 0.10)
+            lerp_colour(theme::node(), tag, 0.10)
         } else {
-            NODE_BG
+            theme::node()
         };
         painter.rect_filled(
             r,
@@ -2084,7 +2087,7 @@ impl Editor {
         );
         let head = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H * z));
         let head_fill = lerp_colour(
-            NODE_HEADER,
+            theme::node_header(),
             tag,
             if n.colour.is_some() { 0.45 } else { 0.14 },
         );
@@ -2113,21 +2116,21 @@ impl Editor {
             Align2::LEFT_CENTER,
             format!("{:02}", n.id.0),
             font.clone(),
-            TEXT_DIM.gamma_multiply(dim),
+            theme::text_weak().gamma_multiply(dim),
         );
         painter.text(
             head.left_center() + vec2(32.0 * z, 0.0),
             Align2::LEFT_CENTER,
             truncate(&n.label, 17),
             font,
-            TEXT.gamma_multiply(dim),
+            theme::text().gamma_multiply(dim),
         );
         let badge = if error.is_some() {
-            Some(("⚠", ERROR))
+            Some(("⚠", theme::error()))
         } else if n.bypass {
-            Some(("off", TEXT_DIM))
+            Some(("off", theme::text_weak()))
         } else if c.viewed == Some(n.id) {
-            Some(("◉", ACCENT))
+            Some(("◉", theme::accent()))
         } else {
             None
         };
@@ -2152,7 +2155,8 @@ impl Editor {
                     Align2::LEFT_CENTER,
                     text,
                     small.clone(),
-                    TEXT_DIM.gamma_multiply(dim * if *ty == PortType::Mask { 0.6 } else { 1.0 }),
+                    theme::text_weak()
+                        .gamma_multiply(dim * if *ty == PortType::Mask { 0.6 } else { 1.0 }),
                 );
             }
         }
@@ -2214,7 +2218,7 @@ impl Editor {
                         Align2::RIGHT_CENTER,
                         format!("{v:.2}"),
                         small.clone(),
-                        TEXT_DIM,
+                        theme::text_weak(),
                     );
                 }
             }
@@ -2236,7 +2240,7 @@ impl Editor {
                     Align2::CENTER_CENTER,
                     if n.bypass { "bypassed" } else { "no picture" },
                     small.clone(),
-                    TEXT_DIM,
+                    theme::text_weak(),
                 );
             }
         }
@@ -2268,9 +2272,9 @@ impl Editor {
             painter.galley(tr.min, galley, col);
         }
         let stroke = if self.selected.contains(&n.id) {
-            Stroke::new(2.0, ACCENT)
+            Stroke::new(2.0, theme::accent())
         } else if error.is_some() {
-            Stroke::new(1.0, ERROR)
+            Stroke::new(1.0, theme::error())
         } else {
             Stroke::new(1.0, Color32::from_gray(58))
         };
@@ -2283,7 +2287,7 @@ impl Editor {
                 Align2::LEFT_TOP,
                 truncate(e.lines().next().unwrap_or(""), 60),
                 small,
-                ERROR,
+                theme::error(),
             );
         }
     }
@@ -2566,7 +2570,7 @@ impl Editor {
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_width(270.0);
-                    ui.label(egui::RichText::new(title).small().color(TEXT_DIM));
+                    ui.label(egui::RichText::new(title).small().color(theme::text_weak()));
                     let te = ui.add(
                         egui::TextEdit::singleline(&mut s.text)
                             .hint_text("type to search…")
@@ -3521,7 +3525,11 @@ fn add_menu(
     selected: usize,
 ) -> Option<MenuAction> {
     let mut pick = None;
-    ui.label(egui::RichText::new("Add node").small().color(TEXT_DIM));
+    ui.label(
+        egui::RichText::new("Add node")
+            .small()
+            .color(theme::text_weak()),
+    );
     for cat in Category::ALL {
         let label = egui::RichText::new(cat.name()).color(category_colour(cat));
         ui.menu_button(label, |ui| {
@@ -3625,7 +3633,11 @@ fn node_menu(
         }
         ui.separator();
     }
-    ui.label(egui::RichText::new("Colour").small().color(TEXT_DIM));
+    ui.label(
+        egui::RichText::new("Colour")
+            .small()
+            .color(theme::text_weak()),
+    );
     if let Some(c) = swatches(ui, true) {
         pick = Some(MenuAction::Colour(c));
     }
@@ -3683,7 +3695,11 @@ fn node_menu(
 
 fn frame_menu(ui: &mut egui::Ui, id: u32) -> Option<MenuAction> {
     let mut pick = None;
-    ui.label(egui::RichText::new("Frame colour").small().color(TEXT_DIM));
+    ui.label(
+        egui::RichText::new("Frame colour")
+            .small()
+            .color(theme::text_weak()),
+    );
     if let Some(Some(c)) = swatches(ui, false) {
         pick = Some(MenuAction::FrameColour(id, c));
     }
@@ -3708,7 +3724,7 @@ fn group_menu(ui: &mut egui::Ui, g: &Group) -> Option<MenuAction> {
     ui.label(
         egui::RichText::new(format!("Group \"{}\"", g.label))
             .small()
-            .color(TEXT_DIM),
+            .color(theme::text_weak()),
     );
     let fold = if g.collapsed {
         "Open   (double-click)"
@@ -3787,13 +3803,13 @@ fn help_overlay(painter: &egui::Painter, rect: Rect) {
     let h = (ROWS.len() as f32 * 19.0 + 44.0).min(rect.height() - 10.0);
     let r = Rect::from_center_size(rect.center(), vec2(w, h));
     painter.rect_filled(r, 8.0, Color32::from_black_alpha(225));
-    painter.rect_stroke(r, 8.0, Stroke::new(1.0, theme::LINE), StrokeKind::Inside);
+    painter.rect_stroke(r, 8.0, Stroke::new(1.0, theme::line()), StrokeKind::Inside);
     painter.text(
         r.left_top() + vec2(16.0, 12.0),
         Align2::LEFT_TOP,
         "Node graph shortcuts",
         FontId::proportional(15.0),
-        ACCENT,
+        theme::accent(),
     );
     for (i, (k, v)) in ROWS.iter().enumerate() {
         let y = r.top() + 38.0 + i as f32 * 19.0;
@@ -3805,14 +3821,14 @@ fn help_overlay(painter: &egui::Painter, rect: Rect) {
             Align2::LEFT_TOP,
             *k,
             FontId::proportional(12.5),
-            TEXT,
+            theme::text(),
         );
         painter.text(
             pos2(r.left() + 16.0 + w * 0.44, y),
             Align2::LEFT_TOP,
             *v,
             FontId::proportional(12.5),
-            TEXT_DIM,
+            theme::text_weak(),
         );
     }
 }
@@ -3826,7 +3842,7 @@ fn port(painter: &egui::Painter, p: Pos2, ty: PortType, z: f32, dim: f32, linked
             1.0
         },
     );
-    painter.circle_filled(p, r, CANVAS_BG);
+    painter.circle_filled(p, r, theme::canvas());
     painter.circle_stroke(p, r, Stroke::new(1.5, col));
     painter.circle_filled(p, r * if linked { 0.55 } else { 0.3 }, col);
 }

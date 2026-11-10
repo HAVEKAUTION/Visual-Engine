@@ -149,7 +149,7 @@ impl MediaPool {
         });
         match &self.cameras {
             Some(Err(e)) => {
-                ui.label(RichText::new(e).small().color(theme::ERROR));
+                ui.label(RichText::new(e).small().color(theme::error()));
             }
             Some(Ok(list)) if list.is_empty() => {
                 ui.label(
@@ -170,7 +170,7 @@ impl MediaPool {
                         ui.painter().rect_stroke(
                             resp.rect.expand(2.0),
                             4.0,
-                            egui::Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.5)),
+                            egui::Stroke::new(1.0, theme::accent().gamma_multiply(0.5)),
                             egui::StrokeKind::Outside,
                         );
                     }
@@ -264,7 +264,7 @@ impl MediaPool {
                          Gyan.FFmpeg  then restart the app.",
                     )
                     .small()
-                    .color(theme::ERROR),
+                    .color(theme::error()),
                 );
             }
         }
@@ -315,9 +315,9 @@ impl MediaPool {
                 }
                 ui.vertical(|ui| {
                     ui.label(RichText::new(truncate(&name, 26)).color(if missing {
-                        theme::ERROR
+                        theme::error()
                     } else {
-                        theme::TEXT
+                        theme::text()
                     }));
                     let tag = match (missing, kind) {
                         (true, _) => "missing".to_string(),
@@ -344,7 +344,7 @@ impl MediaPool {
                 ui.painter().rect_stroke(
                     row.response.rect.expand(2.0),
                     4.0,
-                    egui::Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.5)),
+                    egui::Stroke::new(1.0, theme::accent().gamma_multiply(0.5)),
                     egui::StrokeKind::Outside,
                 );
             }

@@ -123,7 +123,11 @@ pub fn build(layout: Layout) -> Tree<Pane> {
             );
             let viewer = tabs(&mut t, &[Pane::Viewer], &[]);
             let inspector = tabs(&mut t, &[Pane::Inspector], &[]);
-            let top = split(&mut t, H, &[(left, 0.22), (viewer, 0.5), (inspector, 0.28)]);
+            let top = split(
+                &mut t,
+                H,
+                &[(left, 0.25), (viewer, 0.48), (inspector, 0.27)],
+            );
             let bottom = tabs(&mut t, &[Pane::Graph, Pane::Meters], &[Pane::Meters]);
             split(&mut t, V, &[(top, 0.58), (bottom, 0.42)])
         }

@@ -17,9 +17,7 @@ use crate::graph_view::Workspace;
 use crate::mod_editor;
 use crate::perform::{KeyAction, MACROS, Perform};
 
-const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
 const OK_COLOR: Color32 = Color32::from_rgb(120, 230, 140);
-const ACCENT: Color32 = Color32::from_rgb(255, 200, 100);
 
 /// A scene loaded on one of the renderer's decks.
 struct Deck {
@@ -569,7 +567,7 @@ impl SceneView {
     /// The scene panel.
     pub fn controls(&mut self, ui: &mut egui::Ui) {
         if self.renderer.is_none() {
-            ui.label(RichText::new("No GPU renderer available.").color(ERROR_COLOR));
+            ui.label(RichText::new("No GPU renderer available.").color(crate::theme::error()));
             return;
         }
         ui.horizontal(|ui| {
@@ -708,12 +706,17 @@ impl SceneView {
             } else {
                 "Shader error:"
             };
-            ui.label(RichText::new(note).color(ERROR_COLOR).strong());
+            ui.label(RichText::new(note).color(crate::theme::error()).strong());
             egui::ScrollArea::both()
                 .id_salt("shader-error")
                 .max_height(200.0)
                 .show(ui, |ui| {
-                    ui.label(RichText::new(err).monospace().small().color(ERROR_COLOR));
+                    ui.label(
+                        RichText::new(err)
+                            .monospace()
+                            .small()
+                            .color(crate::theme::error()),
+                    );
                 });
         } else if let Some((file, at, true)) = &self.last_reload
             && at.elapsed().as_secs_f32() < 3.0
@@ -854,7 +857,7 @@ impl SceneView {
                     .unwrap_or_else(|| "–".into());
                 egui::ComboBox::from_id_salt(("key", id))
                     .width(34.0)
-                    .selected_text(RichText::new(key_text).color(ACCENT))
+                    .selected_text(RichText::new(key_text).color(crate::theme::accent()))
                     .show_ui(ui, |ui| {
                         ui.label(RichText::new("Put on key").small().weak());
                         for k in 0..BANK_SLOTS {
@@ -947,17 +950,17 @@ impl SceneView {
             }
         });
         if let Some((msg, ok)) = &self.preset_status {
-            ui.label(
-                RichText::new(msg)
-                    .small()
-                    .color(if *ok { OK_COLOR } else { ERROR_COLOR }),
-            );
+            ui.label(RichText::new(msg).small().color(if *ok {
+                OK_COLOR
+            } else {
+                crate::theme::error()
+            }));
         }
         for (file, err) in &self.presets.errors {
             ui.label(
                 RichText::new(format!("{file}: {err}"))
                     .small()
-                    .color(ERROR_COLOR),
+                    .color(crate::theme::error()),
             );
         }
     }
