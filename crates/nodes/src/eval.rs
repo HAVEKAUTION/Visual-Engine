@@ -30,6 +30,7 @@ use scenes::{CompiledScene, ParamState, SceneLibrary, SignalState};
 use signals::modulation::{ModContext, Modulator, Wave, random_walk};
 
 use crate::registry::{self, *};
+use crate::switch::{SWITCH_SHADER, SwitchKnobs, SwitchState};
 
 /// Is this a CPU node (signal or trigger) rather than a picture node?
 pub fn is_signal_kind(kind: &str) -> bool {
@@ -471,6 +472,10 @@ pub struct Evaluator {
     camera_modes: HashMap<NodeId, std::sync::Arc<Vec<CameraMode>>>,
     /// Built-in passes (mask, layer blend), built on first use.
     builtin: HashMap<&'static str, Option<(ScenePipeline, ParamState)>>,
+    /// Each Switch node's memory (which picture, transition progress).
+    switches: HashMap<NodeId, SwitchState>,
+    /// Picture nodes skipped last frame because nothing showed them.
+    pub skipped: usize,
 }
 
 /// Renderer keys of the extra pictures a node makes (its masked result,
@@ -512,6 +517,8 @@ impl Evaluator {
             bus_source: None,
             camera_modes: HashMap::new(),
             builtin: HashMap::new(),
+            switches: HashMap::new(),
+            skipped: 0,
         }
     }
 
@@ -758,20 +765,59 @@ impl Evaluator {
         self.sig.retain(|id, _| graph.node(*id).is_some());
         self.play.retain(|id, _| graph.node(*id).is_some());
         self.vsig.retain(|id, _| graph.node(*id).is_some());
+        self.switches.retain(|id, _| graph.node(*id).is_some());
         self.media_info.clear();
         // Video signals from last frame go on the bus first.
         input.signals.set_video(self.bus_video);
         let mut bus_video = None;
-        let main: BTreeSet<NodeId> = graph.plan(targets).into_iter().collect();
         let all: Vec<NodeId> = targets.iter().chain(previews).copied().collect();
+        // CPU nodes (signals, triggers) first: they never take pictures, and
+        // the Switch / Layer Mixer need their values to know which pictures
+        // can be seen. Then only the picture nodes that can be seen (or have
+        // a thumbnail on screen) are drawn.
+        let (cpu, gpu): (Vec<NodeId>, Vec<NodeId>) = graph
+            .plan(&all)
+            .into_iter()
+            .partition(|id| graph.node(*id).is_some_and(|n| is_signal_kind(&n.kind)));
+        let mut main: BTreeSet<NodeId> = BTreeSet::new();
+        let mut needed: BTreeSet<NodeId> = BTreeSet::new();
+        let mut pruned = false;
+        let picture_nodes = gpu.len();
 
         let beats = input.signals.get("beats").unwrap_or(0.0) as f64;
         let time = input.signals.get("time").unwrap_or(0.0) as f64;
         // Which picture each node puts out this frame (`None` = black).
         let mut image: HashMap<NodeId, Option<u64>> = HashMap::new();
 
-        for id in graph.plan(&all) {
+        for id in cpu.into_iter().chain(gpu) {
             let Some(node) = graph.node(id) else { continue };
+            if !is_signal_kind(&node.kind) {
+                if !pruned {
+                    pruned = true;
+                    let sig = &*input.signals;
+                    let lookup = |n: &str| sig.get(n);
+                    let ctx = ModContext {
+                        signal: &lookup,
+                        beats,
+                        time,
+                        controls: input.controls,
+                    };
+                    main = self.visible_nodes(graph, targets, &ctx, input.intensity, input.dt);
+                    needed = main.clone();
+                    needed.extend(graph.plan(previews));
+                    let drawn = needed
+                        .iter()
+                        .filter(|n| graph.node(**n).is_some_and(|n| !is_signal_kind(&n.kind)))
+                        .count();
+                    self.skipped = picture_nodes.saturating_sub(drawn);
+                }
+                // Pictures, videos and cameras always run: they're cheap to
+                // draw, and loading is the slow part, so a hidden one is
+                // ready the moment a Switch cuts to it.
+                if !needed.contains(&id) && !registry::is_media_kind(&node.kind) {
+                    continue;
+                }
+            }
             let first_input = |image: &HashMap<NodeId, Option<u64>>| {
                 node.inputs
                     .iter()
@@ -955,6 +1001,13 @@ impl Evaluator {
                             (p.def.name.clone(), v)
                         })
                         .collect();
+                    // The Switch's state, worked out in `visible_nodes`.
+                    let mut values = values;
+                    if registry::shader_file(kind) == Some(SWITCH_SHADER)
+                        && let Some(st) = self.switches.get(&id)
+                    {
+                        values.extend(st.shader_values().map(|(n, v)| (n.to_string(), vec![v])));
+                    }
                     if let Err(e) = self.prepare(node, file, library, renderer) {
                         self.errors.insert(id, e);
                     }
@@ -1266,6 +1319,126 @@ impl Evaluator {
 
 /// Video signals when no media node feeds them: still, centred, dark.
 const IDLE_VIDEO: [f32; 5] = [0.0, 0.5, 0.5, 0.0, 0.0];
+
+impl Evaluator {
+    /// Advance every Switch one frame, then walk back from `targets` through
+    /// picture wires, leaving out what can't be seen this frame: a Switch's
+    /// pictures other than the one showing (and the one before it during a
+    /// transition), and Layer Mixer layers that are muted, not soloed or at
+    /// zero opacity. Returns the nodes to draw at full size.
+    fn visible_nodes(
+        &mut self,
+        graph: &Graph,
+        targets: &[NodeId],
+        ctx: &ModContext,
+        intensity: f32,
+        dt: f32,
+    ) -> BTreeSet<NodeId> {
+        let bpm = ctx_bpm(ctx) as f32;
+        for node in graph.nodes() {
+            if node.bypass || registry::shader_file(&node.kind) != Some(SWITCH_SHADER) {
+                continue;
+            }
+            let num = |name: &str, d: f32| {
+                node.param(name)
+                    .map(|p| effective_value(graph, node.id, p, ctx, &self.values, intensity))
+                    .unwrap_or(d)
+            };
+            let choice = |name: &str| match node.param(name).map(|p| &p.value) {
+                Some(ParamValue::Choice(c)) => *c,
+                _ => 0,
+            };
+            let knobs = SwitchKnobs {
+                show: num("show", 0.0),
+                count: choice("count") as usize + 2,
+                random: choice("order") == 1,
+                transition: choice("transition"),
+                beats: num("beats", 1.0),
+            };
+            let seed = u64::from(node.id.0).wrapping_mul(0x2545_F491_4F6C_DD1D);
+            self.switches
+                .entry(node.id)
+                .or_default()
+                .step(&knobs, dt, bpm, seed);
+        }
+
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<NodeId> = targets.to_vec();
+        while let Some(id) = stack.pop() {
+            if !seen.insert(id) {
+                continue;
+            }
+            let Some(node) = graph.node(id) else { continue };
+            let hidden = self.hidden_inputs(graph, node, ctx, intensity);
+            for l in graph.links() {
+                match &l.to {
+                    graph::Endpoint::Input { node: to, port }
+                        if *to == id && !hidden.iter().any(|h| h == port) =>
+                    {
+                        stack.push(l.from.node);
+                    }
+                    // Signal wires come from CPU nodes (already run); keep
+                    // them in the set too.
+                    graph::Endpoint::Param { node: to, .. } if *to == id => {
+                        stack.push(l.from.node);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        seen
+    }
+
+    /// Picture inputs of `node` that can't be seen this frame.
+    fn hidden_inputs(
+        &self,
+        graph: &Graph,
+        node: &Node,
+        ctx: &ModContext,
+        intensity: f32,
+    ) -> Vec<String> {
+        if node.bypass {
+            return Vec::new();
+        }
+        if registry::shader_file(&node.kind) == Some(SWITCH_SHADER) {
+            let Some(st) = self.switches.get(&node.id) else {
+                return Vec::new();
+            };
+            let vis = st.visible();
+            return ["a", "b", "c", "d"]
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !vis[*i])
+                .map(|(_, p)| p.to_string())
+                .collect();
+        }
+        if node.kind == LAYER_MIXER {
+            let flag = |name: &str| {
+                matches!(
+                    node.param(name).map(|p| &p.value),
+                    Some(ParamValue::Bool(true))
+                )
+            };
+            let any_solo = (1..=LAYERS).any(|i| flag(&layer_param("solo", i)));
+            return (1..=LAYERS)
+                .filter(|i| {
+                    let off = if any_solo {
+                        !flag(&layer_param("solo", *i))
+                    } else {
+                        flag(&layer_param("mute", *i))
+                    };
+                    let opacity = node
+                        .param(&layer_param("opacity", *i))
+                        .map(|p| effective_value(graph, node.id, p, ctx, &self.values, intensity))
+                        .unwrap_or(1.0);
+                    off || opacity <= 0.001
+                })
+                .map(layer_port)
+                .collect();
+        }
+        Vec::new()
+    }
+}
 
 /// The tempo now (120 until one is found).
 fn ctx_bpm(ctx: &ModContext) -> f64 {

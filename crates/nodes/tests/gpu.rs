@@ -933,6 +933,128 @@ fn transform_keeps_a_cut_out_see_through() {
 }
 
 #[test]
+fn a_switch_only_draws_the_pictures_you_can_see() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    // Scenes (the expensive kind). Pictures and videos always run, so a
+    // hidden one is loaded and ready when the Switch cuts to it.
+    let pics: Vec<NodeId> = [
+        "aurora_drift",
+        "warehouse_tunnel",
+        "iron_furnace",
+        "kaleido_bloom",
+    ]
+    .iter()
+    .map(|s| add(&mut g, &registry::shader_kind(&format!("{s}.wgsl"))))
+    .collect();
+    let sw = add(&mut g, &registry::shader_kind("fx_switch.wgsl"));
+    for (p, port) in pics.iter().zip(["a", "b", "c", "d"]) {
+        wire(&mut g, *p, sw, port);
+    }
+    wire(&mut g, sw, out, "image");
+    set(&mut g, sw, "count", graph::ParamValue::Choice(2)); // 4 pictures
+    set(&mut g, sw, "transition", graph::ParamValue::Choice(0)); // cut
+    s.frame(&g, out);
+    s.frame(&g, out);
+    assert_eq!(s.ev.skipped, 3, "a cut: only the picture showing is drawn");
+    // A long dissolve to the last picture: both are drawn while it runs.
+    set(&mut g, sw, "transition", graph::ParamValue::Choice(1));
+    set(&mut g, sw, "beats", graph::ParamValue::Float(8.0));
+    set(&mut g, sw, "show", graph::ParamValue::Float(1.0));
+    s.frame(&g, out);
+    s.frame(&g, out);
+    assert_eq!(s.ev.skipped, 2, "a dissolve draws the old and the new");
+}
+
+/// Two pictures in a Switch (cut), into `effect`: returns the graph, the
+/// Switch and the effect.
+fn cut_into(
+    g: &mut Graph,
+    out: NodeId,
+    name: &str,
+    a: [u8; 4],
+    b: [u8; 4],
+    effect: &str,
+) -> (NodeId, NodeId, [NodeId; 2]) {
+    let pa = picture_node(g, &format!("{name}_a"), move |_, _| a);
+    let pb = picture_node(g, &format!("{name}_b"), move |_, _| b);
+    let sw = add(g, &registry::shader_kind("fx_switch.wgsl"));
+    wire(g, pa, sw, "a");
+    wire(g, pb, sw, "b");
+    set(g, sw, "count", graph::ParamValue::Choice(0));
+    set(g, sw, "transition", graph::ParamValue::Choice(0));
+    let fx = add(g, &registry::shader_kind(effect));
+    wire(g, sw, fx, "input");
+    wire(g, fx, out, "image");
+    (sw, fx, [pa, pb])
+}
+
+#[test]
+fn afterimage_leaves_a_ghost_that_fades() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let (sw, fx, pics) = cut_into(
+        &mut g,
+        out,
+        "ghost",
+        [255, 255, 255, 255],
+        [0, 0, 0, 255],
+        "fx_afterimage.wgsl",
+    );
+    set(&mut g, fx, "complement", graph::ParamValue::Float(0.0));
+    set(&mut g, fx, "trail", graph::ParamValue::Float(0.9));
+    s.settle(&g, out, &pics);
+    let mid = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2)[0];
+    assert!(mid(&s.frame(&g, out)) > 240, "the picture itself");
+    set(&mut g, sw, "show", graph::ParamValue::Float(1.0)); // cut to black
+    s.frame(&g, out);
+    let soon = mid(&s.frame(&g, out));
+    assert!(soon > 120, "a ghost is left behind: {soon}");
+    for _ in 0..90 {
+        s.frame(&g, out);
+    }
+    let later = mid(&s.frame(&g, out));
+    assert!(later < 20, "and it fades: {later}");
+}
+
+#[test]
+fn datamosh_holds_the_old_picture_only_while_moshing() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let (sw, fx, pics) = cut_into(
+        &mut g,
+        out,
+        "mosh",
+        [255, 0, 0, 255],
+        [0, 0, 255, 255],
+        "fx_datamosh.wgsl",
+    );
+    s.settle(&g, out, &pics);
+    let mid = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
+    // Idle (no snares or drops in the test signal): it's the picture.
+    assert!(mid(&s.frame(&g, out))[0] > 240);
+    set(&mut g, sw, "show", graph::ParamValue::Float(1.0));
+    s.frame(&g, out);
+    assert!(
+        mid(&s.frame(&g, out))[2] > 240,
+        "idle: cuts straight to blue"
+    );
+    // Moshing: cut back to red, but blue refuses to leave.
+    set(&mut g, fx, "mosh", graph::ParamValue::Float(1.0));
+    set(&mut g, fx, "heal", graph::ParamValue::Float(0.0));
+    set(&mut g, sw, "show", graph::ParamValue::Float(0.0));
+    s.frame(&g, out);
+    let held = mid(&s.frame(&g, out));
+    assert!(
+        held[2] > 200 && held[0] < 60,
+        "the old picture stays: {held:?}"
+    );
+}
+
+#[test]
 fn switch_moves_on_in_turn_and_at_random() {
     let Some(mut s) = Session::new() else { return };
     let mut g = Graph::new();

@@ -50,7 +50,7 @@ impl Pane {
             Pane::Inspector => "Settings of the selected node",
             Pane::Sources => "Where the sound comes from (song, input, computer audio) and cameras",
             Pane::Media => "Your pictures and videos",
-            Pane::Looks => "Signature looks (coming in M6)",
+            Pane::Looks => "Signature Looks: whole sets built around one idea. Click Play.",
             Pane::Analysis => "Tempo, tap, events, offline analysis",
             Pane::Meters => "Every signal as a meter (M)",
         }

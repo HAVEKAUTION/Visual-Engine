@@ -5,10 +5,12 @@
 //! - [`demo`]: a small hard-coded test graph (temporary, until the node
 //!   editor arrives).
 
+pub mod build;
 pub mod demo;
 pub mod eval;
 pub mod layers;
 pub mod registry;
+pub mod switch;
 pub mod templates;
 
 pub use eval::{Evaluator, FrameInput, effective_value};

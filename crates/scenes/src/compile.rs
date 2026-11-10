@@ -17,6 +17,9 @@ pub struct CompiledScene {
     pub meta: SceneMeta,
     /// Complete WGSL (user code + prelude), ready for wgpu.
     pub wgsl: String,
+    /// The scene reads its own previous frame (`prev(...)` / `prev_frame`),
+    /// so it needs two output textures; others need only one.
+    pub reads_prev: bool,
 }
 
 /// The full WGSL for a scene: user source first, then the generated code.
@@ -79,7 +82,13 @@ pub fn compile(source: &str, file_name: &str) -> Result<CompiledScene, String> {
             ));
         }
     }
-    Ok(CompiledScene { meta, wgsl })
+    // Look at the user's code only (the prelude always mentions prev_frame).
+    let reads_prev = source.contains("prev(") || source.contains("prev_frame");
+    Ok(CompiledScene {
+        meta,
+        wgsl,
+        reads_prev,
+    })
 }
 
 #[cfg(test)]

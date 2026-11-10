@@ -180,8 +180,16 @@ layouts, Sources panel, themes in `app/src/theme.rs`: UI colours come from
 `media::picture_role` backdrop/subject sorting, Displace, Liquid, Auto Cut-out;
 the user dislikes the CRT/VHS scene and predictable loops: keep it out).
 The "round bubbling sharp" thing the user liked was the Mandelbrot test picture:
-now the Fractal Bloom scene (`fractal_bloom.wgsl`). Next up: **M6 part 2**: the user
-reviews the signature Looks pitch, then Looks + Look DNA. No Twitch.
+now the Fractal Bloom scene (`fractal_bloom.wgsl`). M6 part 2a done: the user picked
+**Afterimage, Datamosh, Fractal** from the pitch; they're in the `looks` crate with
+genes, a Looks panel and a right-click → Looks menu. Performance: nodes keep one
+output texture unless their shader reads `prev(` (`CompiledScene::reads_prev`); the
+Switch's state runs on the CPU (`nodes/src/switch.rs`) and the evaluator skips
+scenes/effects nobody can see (hidden Switch inputs, muted or 0-opacity layers);
+media nodes always run so they're loaded when shown. Shader inputs named `_x` are
+engine-set, not settings. Next up: **M6 part 2b**: Look DNA (mutate, breed, lineage,
+family tree, live thumbnails). More Looks only if the user asks (remaining pitch
+ideas: Mirror Room, Big Type, Blueprint, Collage, Furnace). No Twitch.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.

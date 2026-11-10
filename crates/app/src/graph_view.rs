@@ -104,6 +104,9 @@ pub struct Workspace {
     missing_checked: Option<Instant>,
     /// Result of the last "look in a folder" relink.
     relink_note: Option<String>,
+    /// The Look playing (if the graph came from one) and its genes, with
+    /// node ids as they are in the graph.
+    pub look: Option<(&'static str, Vec<looks::Gene>)>,
 }
 
 impl Workspace {
@@ -149,6 +152,7 @@ impl Workspace {
             missing: Vec::new(),
             missing_checked: None,
             relink_note: None,
+            look: None,
         }
     }
 
@@ -405,23 +409,7 @@ impl Workspace {
             self.history.seal();
         }
         let viewed = self.selected_picture().or_else(|| self.viewed());
-        let all = |kind: media::Kind, n: usize| {
-            self.pool
-                .items
-                .iter()
-                .filter(|p| media::kind_of(p) == Some(kind) && p.exists())
-                .take(n)
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-        };
-        let demo_media = nodes::demo::DemoMedia {
-            videos: all(media::Kind::Video, 2),
-            photos: all(media::Kind::Image, 3),
-            camera: match &self.pool.cameras {
-                Some(Ok(list)) => list.first().map(|c| c.name.clone()),
-                _ => None,
-            },
-        };
+        let demo_media = self.media_for(2, 3);
         self.editor.show(
             ui,
             graph_editor::Ctx {
@@ -436,6 +424,61 @@ impl Workspace {
                 demo_media,
             },
         );
+        if let Some(id) = self.editor.want_look.take() {
+            let msg = self.load_look(id, library).unwrap_or_else(|e| e);
+            self.notice = Some(msg);
+        }
+    }
+
+    /// Media from the pool for templates and Looks: up to `videos` videos and
+    /// `photos` pictures that are on disk, and the first camera.
+    pub fn media_for(&self, videos: usize, photos: usize) -> nodes::demo::DemoMedia {
+        let all = |kind: media::Kind, n: usize| {
+            self.pool
+                .items
+                .iter()
+                .filter(|p| media::kind_of(p) == Some(kind) && p.exists())
+                .take(n)
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+        };
+        nodes::demo::DemoMedia {
+            videos: all(media::Kind::Video, videos),
+            photos: all(media::Kind::Image, photos),
+            camera: match &self.pool.cameras {
+                Some(Ok(list)) => list.first().map(|c| c.name.clone()),
+                _ => None,
+            },
+        }
+    }
+
+    /// Replace the graph with a Look (one undo step). Returns the message
+    /// for the user.
+    pub fn load_look(&mut self, id: &str, library: &SceneLibrary) -> Result<String, String> {
+        let look = looks::find(id).ok_or_else(|| format!("No Look called {id}"))?;
+        let built = looks::build(id, library, &self.media_for(4, 8))?;
+        let (cmds, map) = graph_editor::replace_commands(&mut self.graph, &built.graph);
+        self.history
+            .exec(&mut self.graph, Command::Batch(cmds))
+            .map_err(|e| e.to_string())?;
+        self.history.seal();
+        let genes = built
+            .genes
+            .into_iter()
+            .filter_map(|g| {
+                Some(looks::Gene {
+                    node: *map.get(&g.node)?,
+                    ..g
+                })
+            })
+            .collect();
+        self.look = Some((look.id, genes));
+        self.editor.reframe();
+        Ok(if built.summary.is_empty() {
+            format!("{}: {}", look.name, look.character)
+        } else {
+            format!("{}: {} {}", look.name, built.summary, look.character)
+        })
     }
 
     /// The Inspector: everything about the selected node.

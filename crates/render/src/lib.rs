@@ -110,8 +110,10 @@ pub const DECKS: usize = 2;
 /// The render targets of one deck or graph node. New textures start black.
 struct DeckTargets {
     size: (u32, u32),
-    /// Output, ping-pong: `output[out_cur]` is the latest frame.
-    output: [Tex; 2],
+    /// Output: `output[out_cur]` is the latest frame. One texture, or two
+    /// (ping-pong) for scenes that read their own previous frame: most
+    /// don't, and a second full-size texture per node adds up fast.
+    output: Vec<Tex>,
     out_cur: usize,
     /// Buffers A and B (ping-pong each), created only for scenes that use them.
     bufs: [Option<[Tex; 2]>; MAX_BUFFERS],
@@ -125,7 +127,7 @@ impl DeckTargets {
         let t = |l: &str| Tex::new(device, &format!("{label} {l}"), size, SCENE_FORMAT);
         Self {
             size,
-            output: [t("output 0"), t("output 1")],
+            output: vec![t("output 0")],
             out_cur: 0,
             bufs: [None, None],
             buf_cur: [0; MAX_BUFFERS],
@@ -142,6 +144,21 @@ impl DeckTargets {
 
     fn latest(&self) -> &wgpu::TextureView {
         &self.output[self.out_cur].view
+    }
+
+    /// A second output texture, for scenes that read the previous frame.
+    fn ensure_double(&mut self, device: &wgpu::Device) {
+        if self.output.len() < 2 {
+            let t = Tex::new(device, "output 1", self.size, SCENE_FORMAT);
+            self.output.push(t);
+        }
+    }
+
+    /// Bytes of GPU memory these targets use.
+    fn bytes(&self) -> u64 {
+        let px = self.size.0 as u64 * self.size.1 as u64 * SCENE_BYTES_PER_PIXEL;
+        let bufs: u64 = self.bufs.iter().flatten().map(|b| b.len() as u64).sum();
+        (self.output.len() as u64 + bufs) * px
     }
 }
 
@@ -169,8 +186,11 @@ struct MediaTex {
     picture: u64,
 }
 
+/// Bytes per pixel of [`SCENE_FORMAT`] (four 16-bit floats).
+const SCENE_BYTES_PER_PIXEL: u64 = 8;
+
 /// Graph-node targets kept for reuse (by size) after a node stops being drawn.
-const POOL_LIMIT: usize = 12;
+const POOL_LIMIT: usize = 4;
 
 /// Master controls applied after the decks are mixed.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -199,6 +219,8 @@ pub struct ScenePipeline {
     persistent: [bool; MAX_BUFFERS],
     /// Some pass renders into buffer A / B.
     uses_buffer: [bool; MAX_BUFFERS],
+    /// Reads its own previous frame (needs two output textures).
+    reads_prev: bool,
     params_buf: wgpu::Buffer,
     pub name: String,
 }
@@ -453,6 +475,7 @@ impl Renderer {
                     .iter()
                     .any(|p| scene.meta.pass_target(p) == Ok(Target::Buffer(i)))
             }),
+            reads_prev: scene.reads_prev,
             params_buf,
             name: scene.meta.name.clone(),
         })
@@ -667,6 +690,25 @@ impl Renderer {
         self.profiler.as_ref().map(|p| (p.times(), p.total()))
     }
 
+    /// GPU memory used by pictures (node targets, pool, media, display), in
+    /// bytes. An estimate from texture sizes; the driver adds a little.
+    pub fn gpu_bytes(&self) -> u64 {
+        let targets: u64 = self
+            .nodes
+            .values()
+            .chain(self.pool.iter())
+            .chain(self.decks.iter().flatten())
+            .map(DeckTargets::bytes)
+            .sum();
+        let media: u64 = self
+            .media
+            .values()
+            .map(|m| m.size.0 as u64 * m.size.1 as u64 * 4)
+            .sum();
+        let display = self.size.0 as u64 * self.size.1 as u64 * 4;
+        targets + media + display
+    }
+
     /// Graph-node targets alive and pooled (for tests and stats).
     pub fn node_target_counts(&self) -> (usize, usize) {
         (self.nodes.len(), self.pool.len())
@@ -707,6 +749,9 @@ impl Renderer {
                 t.ensure_buffer(&self.device, i);
             }
         }
+        if scene.reads_prev {
+            t.ensure_double(&self.device);
+        }
         self.queue.write_buffer(&self.signal_buf, 0, signals);
         let params_bytes: Vec<u8> = params.iter().flat_map(|v| v.to_ne_bytes()).collect();
         let n = (params_bytes.len() as u64).min(scene.params_buf.size());
@@ -724,8 +769,15 @@ impl Renderer {
         let mut latest: [Option<usize>; MAX_BUFFERS] = std::array::from_fn(|i| {
             (scene.persistent[i] && t.bufs[i].is_some()).then_some(t.buf_cur[i])
         });
-        let prev_out = t.out_cur;
-        let next_out = 1 - t.out_cur;
+        // With one output texture there is no previous frame to read (the
+        // scene doesn't ask for it): it reads black, and we draw in place.
+        let double = t.output.len() == 2;
+        let prev_view = if double {
+            &t.output[t.out_cur].view
+        } else {
+            &self.black.view
+        };
+        let next_out = if double { 1 - t.out_cur } else { 0 };
         let input = |i: usize| inputs[i].unwrap_or(&self.black.view);
 
         let last = scene.passes.len().saturating_sub(1);
@@ -764,7 +816,7 @@ impl Renderer {
                         binding: 2,
                         resource: wgpu::BindingResource::Sampler(&self.sampler),
                     },
-                    tex_entry(3, &t.output[prev_out].view),
+                    tex_entry(3, prev_view),
                     tex_entry(4, buf_view(0)),
                     tex_entry(5, buf_view(1)),
                     tex_entry(6, input(0)),

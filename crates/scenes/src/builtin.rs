@@ -97,6 +97,14 @@ pub const BUILTIN: &[Builtin] = &[
         source: include_str!("../shaders/mask_auto_cutout.wgsl"),
     },
     Builtin {
+        file_name: "fx_afterimage.wgsl",
+        source: include_str!("../shaders/fx_afterimage.wgsl"),
+    },
+    Builtin {
+        file_name: "fx_datamosh.wgsl",
+        source: include_str!("../shaders/fx_datamosh.wgsl"),
+    },
+    Builtin {
         file_name: "fx_switch.wgsl",
         source: include_str!("../shaders/fx_switch.wgsl"),
     },

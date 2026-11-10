@@ -63,6 +63,8 @@ pub struct SceneView {
     fps_mark: (u32, Instant),
     pub fps: f32,
     pub frame_ms: f32,
+    /// Graphics memory the pictures use (MB, estimated from texture sizes).
+    pub gpu_mb: f32,
     last_reload: Option<(String, Instant, bool)>,
     /// The node graph (the v2 core).
     pub ws: Workspace,
@@ -144,6 +146,7 @@ impl SceneView {
             fps_mark: (0, Instant::now()),
             fps: 0.0,
             frame_ms: 0.0,
+            gpu_mb: 0.0,
             last_reload: None,
             ws,
             graph_mode: true,
@@ -454,6 +457,7 @@ impl SceneView {
             });
         }
         renderer.end_frame();
+        self.gpu_mb = renderer.gpu_bytes() as f32 / (1024.0 * 1024.0);
         if self.graph_mode {
             self.ws.gpu = renderer.node_times().map(|(times, total)| {
                 let per_node = self
@@ -547,6 +551,12 @@ impl SceneView {
     }
 
     /// The node graph editor (bottom panel).
+    /// Play a Look (replaces the graph; Ctrl+Z brings it back). Returns the
+    /// message for the user.
+    pub fn load_look(&mut self, id: &str) -> String {
+        self.ws.load_look(id, &self.library).unwrap_or_else(|e| e)
+    }
+
     pub fn graph_panel(&mut self, ui: &mut egui::Ui) {
         self.ws.editor_ui(ui, &self.library);
     }

@@ -422,4 +422,8 @@ Lyric/typography tracks synced to the song · Spotify Canvas & TikTok loop expor
 DMX/Art-Net lighting sync · Pioneer/DJ link · OSC signals · phone as a
 wireless controller · Look sharing (single file) and a community gallery · stems
 input (separate drums/bass/vocals signals) · LED wall pixel mapping · AI generative
-source node (later, optional, never required).
+source node (later, optional, never required) · **video editor mode** (user,
+2026-11-11): a timeline with clips on tracks, keyframes (Bezier) on any node setting,
+time remapping, per-clip opacity/volume and transitions between clips, rendered
+through the same node graph and exported like M8; the user's wish-list of effects
+and transitions was pasted in the 2026-11-11 session. Revisit after M8.

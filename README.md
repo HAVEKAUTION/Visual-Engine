@@ -36,6 +36,10 @@ not just alongside it.
   Chroma (green screen) keys, a Motion Mask that follows movement, and a Key Mixer.
   Move, scale, turn or corner-pin a picture by dragging handles in the viewer.
   Right-click the graph → *Add compositing demo* to see it all at once.
+- **Signature Looks.** The *Looks* tab: whole sets built around one idea that play
+  by themselves with the music. **Afterimage** (glowing ghosts in the opposite
+  colour), **Datamosh** (cuts that melt into each other like broken video) and
+  **Fractal Bloom** (round bubbling fractal bulbs with spiky edges). Click Play.
 - **Templates for a DJ set.** Right-click the graph → *Templates*. *Your media,
   woven together* sorts your pictures into backdrops and subjects by itself: the
   backdrops bend with the music and the subjects are cut out and float on top.

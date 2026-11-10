@@ -93,6 +93,41 @@ fn built_in_scenes_draw_something() {
 }
 
 #[test]
+fn only_feedback_scenes_keep_two_pictures() {
+    let Some((device, queue)) = gpu() else {
+        eprintln!("no GPU: skipped");
+        return;
+    };
+    let flat = "/*{\"name\": \"flat\"}*/
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(0.5, 0.5, 0.5, 1.0);
+}
+";
+    let echo = "/*{\"name\": \"echo\"}*/
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    return prev(in.uv) * 0.5 + vec4<f32>(0.25, 0.0, 0.0, 1.0);
+}
+";
+    let picture = SIZE.0 as u64 * SIZE.1 as u64 * 8;
+    let mut r = Renderer::new(&device, &queue);
+    render_scene(&mut r, flat, "flat.wgsl", 3);
+    let display = SIZE.0 as u64 * SIZE.1 as u64 * 4;
+    assert_eq!(
+        r.gpu_bytes(),
+        display + picture,
+        "a plain scene keeps one picture"
+    );
+    r.clear_feedback(0);
+    let px = render_scene(&mut r, echo, "echo.wgsl", 12);
+    assert_eq!(r.gpu_bytes(), display + 2 * picture, "feedback keeps two");
+    // Feedback still adds up: 0.25 · (1 + 0.5 + 0.25 + …) → 0.5 (shown as-is: 128;
+    // without feedback it would stay at 0.25 = 64).
+    assert!((px[0] as i32 - 128).abs() <= 4, "feedback red {}", px[0]);
+}
+
+#[test]
 fn persistent_buffer_accumulates_and_feedback_works() {
     let Some((device, queue)) = gpu() else {
         eprintln!("no GPU: skipped");

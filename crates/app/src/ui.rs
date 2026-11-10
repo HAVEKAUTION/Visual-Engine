@@ -276,23 +276,82 @@ impl VisualEngineApp {
     }
 
     fn looks_panel(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(24.0);
-        ui.vertical_centered(|ui| {
-            ui.label(
-                RichText::new("No Looks yet.")
-                    .size(16.0)
-                    .color(Color32::from_gray(200)),
-            );
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(
-                    "Looks are hand-made signature visuals you can switch, mutate and \
-                     breed. They arrive in M6. Until then, build your own in the graph, or \
-                     right-click it → Add compositing demo.",
-                )
-                .weak(),
-            );
+        theme::section(ui, "SIGNATURE LOOKS");
+        ui.label(
+            RichText::new(
+                "Each Look is a whole set built around one idea, and plays by itself with the                  music. Click Play: it replaces the graph (Ctrl+Z brings yours back). Your                  imported videos and pictures are used where they fit.",
+            )
+            .color(theme::text_weak()),
+        );
+        ui.add_space(8.0);
+        let playing = self
+            .scene
+            .ws
+            .look
+            .as_ref()
+            .map(|(id, genes)| (*id, genes.len()));
+        let mut pick = None;
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for l in looks::ALL {
+                let on = playing.is_some_and(|(id, _)| id == l.id);
+                egui::Frame::group(ui.style())
+                    .fill(if on { theme::raised() } else { theme::panel() })
+                    .stroke(Stroke::new(
+                        if on { 1.5 } else { 1.0 },
+                        if on { theme::accent() } else { theme::line() },
+                    ))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            let name = RichText::new(l.name).size(16.0).strong();
+                            ui.label(if on { name.color(theme::accent()) } else { name });
+                            ui.label(
+                                RichText::new(l.idea.to_uppercase())
+                                    .small()
+                                    .color(theme::text_weak()),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                let text = if on { "Restart" } else { "Play" };
+                                if ui
+                                    .button(format!("{} {text}", crate::icons::PLAY))
+                                    .on_hover_text(
+                                        "Replaces the graph with this Look (Ctrl+Z brings it back). Also in the graph's right-click menu → Looks.",
+                                    )
+                                    .clicked()
+                                {
+                                    pick = Some(l.id);
+                                }
+                            });
+                        });
+                        ui.label(l.character);
+                        ui.label(
+                            RichText::new(l.temperament)
+                                .small()
+                                .italics()
+                                .color(theme::text_weak()),
+                        );
+                        ui.label(
+                            RichText::new(format!("Uses: {}", l.uses))
+                                .small()
+                                .color(theme::text_weak()),
+                        );
+                        if let Some((_, genes)) = playing.filter(|_| on) {
+                            ui.label(
+                                RichText::new(format!(
+                                    "Playing now. {genes} settings are marked as genes, ready for                                      Look DNA (mutate and breed, coming next)."
+                                ))
+                                .small()
+                                .color(theme::accent()),
+                            );
+                        }
+                    });
+                ui.add_space(6.0);
+            }
         });
+        if let Some(id) = pick {
+            let msg = self.scene.load_look(id);
+            self.scene.ws.notice = Some(msg);
+        }
     }
 
     /// Where the sound comes from (song, live input, computer audio), the
@@ -834,6 +893,7 @@ impl VisualEngineApp {
                     Some((_, total)) if self.scene.graph_mode => format!(" · GPU {total:.2} ms"),
                     _ => String::new(),
                 };
+                let gpu = format!("{gpu} · {:.0} MB", self.scene.gpu_mb);
                 // Truncates (…) rather than overlapping the buttons when the
                 // window is narrow or the text is big.
                 ui.add(
@@ -849,7 +909,7 @@ impl VisualEngineApp {
                     .truncate(),
                 )
                 .on_hover_text(
-                    "Frames per second and time per frame. GPU = time the graphics card spent on the graph's nodes (each node shows its own share).",
+                    "Frames per second and time per frame. GPU = time the graphics card spent on the graph's nodes (each node shows its own share). MB = graphics memory the pictures use (every node keeps a full-size picture; trails and feedback keep two).",
                 );
             });
         });

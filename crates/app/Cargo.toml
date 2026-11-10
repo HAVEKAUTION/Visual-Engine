@@ -24,6 +24,7 @@ rfd.workspace = true
 render.workspace = true
 scenes.workspace = true
 graph.workspace = true
+looks.workspace = true
 nodes.workspace = true
 media.workspace = true
 ron.workspace = true

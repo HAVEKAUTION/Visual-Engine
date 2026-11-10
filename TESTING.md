@@ -327,6 +327,26 @@ Best done on a PC (or Windows user account) that has never built the app.
       Getting started steps in the Inspector.
 - [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
+## v2 M6 part 2a – Signature Looks, performance
+
+Play music for these.
+- [ ] Click the **Looks** tab: three cards (Afterimage, Datamosh, Fractal Bloom), each
+      with what it looks like and how it reacts. Click **Play** on one: the graph is
+      replaced, the card is highlighted, and a message says what it used. Ctrl+Z
+      brings your graph back.
+- [ ] Right-click the empty graph → **Looks**: the same three.
+- [ ] **Afterimage** with a few pictures imported (a logo on a plain background is
+      best): the picture turns slowly and leaves a glowing ghost in the opposite
+      colour. Ghosts lurch on the beat; on a drop they vanish and start again.
+- [ ] **Datamosh** with a couple of videos imported: every 4 bars it cuts to another
+      clip and the old one smears into the new in blocks, then heals. Snares and
+      drops make it mosh too.
+- [ ] **Fractal Bloom**: the bulbs; on a section change it dissolves slowly into
+      fractal flowers, and back on the next.
+- [ ] The toolbar (top right) shows `GPU … ms · … MB`. Peak time should use well
+      under 100 MB at a normal window size.
+- [ ] In **Peak time**, cuts between scenes never show a black frame.
+
 ## Fractal Bloom scene
 
 Play music for these.

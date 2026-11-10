@@ -599,6 +599,8 @@ pub struct Editor {
     /// the Inspector; cleared as soon as the selection changes.
     pub focus_group: Option<GroupId>,
     framed: bool,
+    /// A Look picked from the right-click menu (loaded by the workspace).
+    pub want_look: Option<&'static str>,
     /// When each trigger node last fired (for the flash).
     fired: HashMap<NodeId, f64>,
     /// Short message for the user (bad wire etc.).
@@ -634,6 +636,7 @@ impl Default for Editor {
             rename: None,
             focus_group: None,
             framed: false,
+            want_look: None,
             fired: HashMap::new(),
             message: None,
             snap: true,
@@ -3284,6 +3287,7 @@ impl Editor {
                     Err(e) => self.say(ui, e),
                 }
             }
+            MenuAction::Look(id) => self.want_look = Some(id),
             MenuAction::Starter => match nodes::demo::build(c.library) {
                 Ok((g, _)) => {
                     let clip = Clip {
@@ -3479,6 +3483,13 @@ impl Editor {
         }
     }
 
+    /// Show the whole graph again on the next draw (after replacing it).
+    pub fn reframe(&mut self) {
+        self.framed = false;
+        self.selected.clear();
+        self.focus_group = None;
+    }
+
     /// Zoom and pan so every node fits in `rect`.
     fn frame_all(&mut self, g: &Graph, rect: Rect) {
         let Some(b) = g
@@ -3532,6 +3543,7 @@ enum MenuAction {
     Starter,
     CompositingDemo,
     Template(&'static str),
+    Look(&'static str),
     AddFrame,
     FrameColour(u32, [u8; 3]),
     RenameFrame(u32),
@@ -3627,6 +3639,20 @@ fn add_menu(
     {
         pick = Some(MenuAction::CompositingDemo);
     }
+    ui.menu_button("\u{E6A2} Looks", |ui| {
+        for l in looks::ALL {
+            if ui
+                .button(l.name)
+                .on_hover_text(format!(
+                    "{}\n\n{}\n\nReplaces the graph (Ctrl+Z brings it back).",
+                    l.character, l.temperament
+                ))
+                .clicked()
+            {
+                pick = Some(MenuAction::Look(l.id));
+            }
+        }
+    });
     if ui
         .button("Clear graph")
         .on_hover_text("Ctrl+Z brings it back")
@@ -3934,4 +3960,42 @@ fn truncate(s: &str, max: usize) -> String {
         t.push('…');
         t
     }
+}
+
+/// Commands that replace everything in `graph` with `new` (one undo step
+/// when run as a [`Command::Batch`]), and how `new`'s node ids map to the ones
+/// they get.
+pub fn replace_commands(graph: &mut Graph, new: &Graph) -> (Vec<Command>, HashMap<NodeId, NodeId>) {
+    let mut cmds: Vec<Command> = graph
+        .nodes()
+        .iter()
+        .map(|n| Command::RemoveNode(n.id))
+        .collect();
+    cmds.extend(graph.frames().iter().map(|f| Command::RemoveFrame(f.id)));
+    cmds.extend(graph.groups().iter().map(|g| Command::RemoveGroup(g.id)));
+    let mut map = HashMap::new();
+    for n in new.nodes() {
+        let id = graph.reserve_node_id();
+        map.insert(n.id, id);
+        let mut copy = n.clone();
+        copy.id = id;
+        cmds.push(Command::AddNode(Box::new(copy)));
+    }
+    for l in new.links() {
+        let (Some(from), Some(to)) = (map.get(&l.from.node), map.get(&l.to.node())) else {
+            continue;
+        };
+        let mut link = l.clone();
+        link.from.node = *from;
+        link.to = match &l.to {
+            Endpoint::Input { port, .. } => Endpoint::input(*to, port),
+            Endpoint::Param { param, .. } => Endpoint::param(*to, param),
+        };
+        cmds.push(Command::Connect(link));
+    }
+    for f in new.frames() {
+        let id = graph.new_frame_id();
+        cmds.push(Command::PutFrame(Frame { id, ..f.clone() }));
+    }
+    (cmds, map)
 }

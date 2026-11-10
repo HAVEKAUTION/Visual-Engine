@@ -124,9 +124,12 @@ pub fn shader_file(kind: &str) -> Option<&str> {
 
 /// The node spec for a scene or effect file.
 pub fn shader_spec(file: &str, meta: &SceneMeta) -> NodeSpec {
+    // Inputs named `_...` are set by the engine each frame (e.g. the Switch's
+    // state): they aren't settings, so the node doesn't show or save them.
     let params = meta
         .inputs
         .iter()
+        .filter(|i| !i.name.starts_with('_'))
         .map(|i| {
             let (min, max) = i.range();
             let d = i.default_value();

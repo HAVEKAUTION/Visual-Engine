@@ -14,19 +14,19 @@
     { "name": "count",      "label": "Pictures used",              "type": "choice", "options": ["2", "3", "4"], "default": 2 },
     { "name": "order",      "label": "Order",                      "type": "choice", "options": ["In turn", "Random (never the same twice)"], "default": 0 },
     { "name": "transition", "label": "Transition",                 "type": "choice", "options": ["Cut", "Dissolve", "Wipe", "Slide", "Zoom through", "Iris", "Mix it up (a different one each time)"], "default": 1 },
-    { "name": "beats",      "label": "Transition time (beats)",    "type": "float",  "min": 0.05, "max": 8, "default": 1 }
-  ],
-  "buffers": [ { "name": "A", "persistent": true } ],
-  "passes": [ { "entry": "fs_state", "target": "A" }, { "entry": "fs_main" } ]
+    { "name": "beats",      "label": "Transition time (beats)",    "type": "float",  "min": 0.05, "max": 8, "default": 1 },
+    { "name": "_now",       "type": "float", "min": 0, "max": 3, "default": 0 },
+    { "name": "_before",    "type": "float", "min": 0, "max": 3, "default": 0 },
+    { "name": "_progress",  "type": "float", "min": 0, "max": 1, "default": 1 },
+    { "name": "_mode",      "type": "float", "min": 0, "max": 5, "default": 0 }
+  ]
 }*/
 
-// Buffer A is the switch's memory, the same across each half:
-// left half:  r = picture now / 4, g = picture before / 4, b = progress 0..1,
-//             a = 1 + transition used / 10 (0 = not started yet)
-// right half: r = the Show value last frame.
-
-const LEFT: vec2<f32> = vec2<f32>(0.25, 0.5);
-const RIGHT: vec2<f32> = vec2<f32>(0.75, 0.5);
+// Which picture shows, the one before it, how far the transition has got
+// and which transition it is are worked out by the engine (nodes::switch) and
+// arrive as the _now, _before, _progress and _mode settings. The engine also
+// skips drawing pictures that can't be seen, so four scenes in a Switch cost
+// about as much as one or two.
 
 fn picture(i: i32, uv: vec2<f32>) -> vec4<f32> {
     switch i {
@@ -37,68 +37,19 @@ fn picture(i: i32, uv: vec2<f32>) -> vec4<f32> {
     }
 }
 
-fn used() -> i32 {
-    return i32(params.count + 0.5) + 2;
-}
-
-fn in_turn_index() -> i32 {
-    let n = f32(used());
-    return i32(round(clamp(params.show, 0.0, 1.0) * (n - 1.0)));
-}
-
-/// The transition for the next change (Mix it up: any but Cut, at random).
-fn pick_transition(seed: f32) -> f32 {
-    let mode = i32(params.transition + 0.5);
-    if mode == 6 {
-        return f32(1 + i32(hash11(seed) * 4.999));
-    }
-    return f32(mode);
-}
-
-@fragment
-fn fs_state(in: VsOut) -> @location(0) vec4<f32> {
-    let s = sample_a(LEFT);
-    let last_show = sample_a(RIGHT).r;
-    if in.uv.x >= 0.5 {
-        return vec4f(params.show, 0.0, 0.0, 1.0);
-    }
-    let n = used();
-    let seed = audio.time * 7.31 + params.show * 13.7;
-    if s.a < 0.5 {
-        let first = in_turn_index();
-        return vec4f(f32(first) / 4.0, f32(first) / 4.0, 1.0, 1.0 + pick_transition(seed) / 10.0);
-    }
-    let now = i32(round(s.r * 4.0));
-    var want = now;
-    if i32(params.order + 0.5) == 0 {
-        want = in_turn_index();
-    } else if abs(params.show - last_show) > 0.001 {
-        // Random: anything but the picture showing now.
-        want = (now + 1 + i32(hash11(seed) * f32(n - 1) * 0.999)) % n;
-    }
-    want = min(want, n - 1);
-    if want != now {
-        return vec4f(f32(want) / 4.0, f32(now) / 4.0, 0.0, 1.0 + pick_transition(seed + 3.1) / 10.0);
-    }
-    // Transition length in seconds from beats (120 BPM until the tempo is known).
-    let bpm = select(120.0, audio.bpm, audio.bpm > 30.0);
-    let secs = max(params.beats * 60.0 / bpm, 0.001);
-    return vec4f(s.r, s.g, min(s.b + audio.delta / secs, 1.0), s.a);
-}
-
 fn inside(uv: vec2<f32>) -> f32 {
     return step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
 }
 
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-    let s = sample_a(LEFT);
-    let now = i32(round(s.r * 4.0));
-    let before = i32(round(s.g * 4.0));
-    let mode = i32(round((s.a - 1.0) * 10.0));
-    let t = smoothstep(0.0, 1.0, s.b);
+    let now = i32(params._now + 0.5);
+    let before = i32(params._before + 0.5);
+    let mode = i32(params._mode + 0.5);
+    let progress = params._progress;
+    let t = smoothstep(0.0, 1.0, progress);
     let uv = in.uv;
-    if mode == 0 || s.b >= 1.0 || now == before {
+    if mode == 0 || progress >= 1.0 || now == before {
         return picture(now, uv);
     }
     switch mode {

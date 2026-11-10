@@ -12,6 +12,7 @@ publish = false
 analysis = { path = "crates/analysis" }
 audio = { path = "crates/audio" }
 graph = { path = "crates/graph" }
+looks = { path = "crates/looks" }
 media = { path = "crates/media" }
 nodes = { path = "crates/nodes" }
 render = { path = "crates/render" }

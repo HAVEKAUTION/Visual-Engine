@@ -2,6 +2,24 @@
 
 One short entry per task, newest first.
 
+## 2026-11-11 — v2 M6 part 2a: signature Looks, lighter on the graphics card
+- **Looks** (the Looks tab, or right-click the graph → Looks): **Afterimage**,
+  **Datamosh** and **Fractal Bloom**, the three picked from the pitch. Each is a whole
+  set with a character and a temperament; Play replaces the graph (Ctrl+Z brings it
+  back) and uses your imported media where it fits. Each marks 7–9 settings as
+  genes, ready for Look DNA.
+- New effects: **Afterimage** (ghost trails in the opposite colour that lurch on the
+  beat and wipe clean on the drop) and **Datamosh** (the old picture dragged in
+  blocks by the new one's movement; fires on snares, section changes and drops).
+- **Less graphics memory:** a node keeps one full-size picture instead of two
+  unless it really uses its previous frame (trails, feedback); spare pictures kept
+  for reuse cut from 12 to 4. The toolbar now shows the memory in use (MB).
+- **Less graphics work:** a Switch no longer draws the pictures you can't see, and
+  muted or fully transparent layers aren't drawn. Peak time: about 2.6 → 1.9 ms per
+  frame. Pictures and videos still load in the background, so cuts never flash
+  black.
+- Fix: graphics tests could hang now and then on start-up.
+
 ## 2026-11-11 — New scene: Fractal Bloom
 - **Fractal Bloom**: the "round bubbling sharp" fractal from the test picture, now a
   live scene. Round bulbs with colour slices inside and spiky edges that flash on

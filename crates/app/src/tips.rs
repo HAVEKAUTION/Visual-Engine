@@ -104,6 +104,12 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
         _ if shader == "mask_auto_cutout.wgsl" => {
             "Put it right after a picture with a plain background (a product shot, a logo, a person against a wall). It removes the edge colour by itself; raise Tolerance if some background is left, Softness for smoother edges. Then Add a layer on top of a scene."
         }
+        _ if shader == "fx_afterimage.wgsl" => {
+            "Put it after something that moves on a dark background (a Transform with Spin speed, a video, a scene). Trail length = how long ghosts last; Ghost in opposite colour turns them into after-images. Set Wipe clean on the drop to 0 to keep the ghosts through drops."
+        }
+        _ if shader == "fx_datamosh.wgsl" => {
+            "Put it right after a Switch set to Cut: each cut then melts into the next. It moshes by itself on snares, section changes and drops; drag a Signal (an Envelope) onto Mosh for more. Bigger Block size = chunkier; Heal speed = how fast it clears."
+        }
         _ if shader == "fx_switch.wgsl" => {
             "Plug up to four pictures in (scenes, videos, photos). To change on the beat: add a Beat Trigger (Every 8 beats) → Counter (Steps = pictures used) → drag the Counter's value onto Show. Pick a Transition and how many beats it takes. Right-click the graph → Templates has sets built this way."
         }
