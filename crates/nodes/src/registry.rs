@@ -480,6 +480,11 @@ pub fn spec_for(kind: &str, library: &scenes::SceneLibrary) -> Result<NodeSpec, 
     Ok(shader_spec(file, &meta))
 }
 
+/// Masks and keys are the `mask_*.wgsl` files.
+pub fn is_mask_file(file: &str) -> bool {
+    file.starts_with("mask_")
+}
+
 /// Where a node type sits in the add menu.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Category {
@@ -487,6 +492,8 @@ pub enum Category {
     Source,
     /// Changes or combines pictures.
     Effect,
+    /// Masks and keys: shapes, ramps, cut-outs (the `mask_*.wgsl` files).
+    Mask,
     /// Makes a number that can drive any slider.
     Signal,
     /// Fires events (hits, beats, thresholds).
@@ -495,9 +502,10 @@ pub enum Category {
 }
 
 impl Category {
-    pub const ALL: [Category; 5] = [
+    pub const ALL: [Category; 6] = [
         Category::Source,
         Category::Effect,
+        Category::Mask,
         Category::Signal,
         Category::Trigger,
         Category::Output,
@@ -507,6 +515,7 @@ impl Category {
         match self {
             Category::Source => "Sources",
             Category::Effect => "Effects",
+            Category::Mask => "Masks & Keys",
             Category::Signal => "Signals",
             Category::Trigger => "Triggers",
             Category::Output => "Output",
@@ -537,7 +546,9 @@ pub fn catalogue(library: &scenes::SceneLibrary) -> Vec<CatalogueEntry> {
             Some(CatalogueEntry {
                 kind: shader_kind(&e.file_name),
                 label: meta.name.clone(),
-                category: if meta.is_effect() {
+                category: if is_mask_file(&e.file_name) {
+                    Category::Mask
+                } else if meta.is_effect() {
                     Category::Effect
                 } else {
                     Category::Source
@@ -660,6 +671,7 @@ pub fn category_of(kind: &str, outputs_image: bool, has_image_inputs: bool) -> C
         AUDIO_SIGNAL | LFO | MATH | REMAP | SMOOTH | ENVELOPE | COUNTER | SAMPLE_HOLD | RANDOM
         | HOLD => Category::Signal,
         PROGRAM_OUT => Category::Output,
+        _ if shader_file(kind).is_some_and(is_mask_file) => Category::Mask,
         _ if outputs_image && !has_image_inputs => Category::Source,
         _ => Category::Effect,
     }

@@ -12,6 +12,7 @@ mod perform;
 mod rhythm_panel;
 mod scene_view;
 mod theme;
+mod tips;
 mod ui;
 
 fn main() -> eframe::Result {

@@ -622,3 +622,130 @@ fn masks_limit_any_node_and_layers_solo_and_mute() {
         left(&px)
     );
 }
+
+#[test]
+fn masks_and_keys_cut_where_they_should() {
+    let Some(mut s) = Session::new() else { return };
+    let kind = |f: &str| registry::shader_kind(f);
+    let centre = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
+    let left = |px: &[u8]| pixel(px, SIZE.0 / 8, SIZE.1 / 2);
+    let mid = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
+    let right = |px: &[u8]| pixel(px, SIZE.0 * 7 / 8, SIZE.1 / 2);
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+
+    // Shape Mask: a white circle in the middle, black in the corner.
+    let shape = add(&mut g, &kind("mask_shape.wgsl"));
+    wire(&mut g, shape, out, "image");
+    let px = s.frame(&g, out);
+    assert!(centre(&px)[0] > 245, "{:?}", centre(&px));
+    assert!(pixel(&px, 2, 2)[0] < 10, "{:?}", pixel(&px, 2, 2));
+
+    // Key Mixer: big circle minus small circle = a ring.
+    let small = add(&mut g, &kind("mask_shape.wgsl"));
+    set(&mut g, shape, "size", graph::ParamValue::Float(0.8));
+    set(&mut g, small, "size", graph::ParamValue::Float(0.4));
+    let km = add(&mut g, &kind("mask_key_mixer.wgsl"));
+    wire(&mut g, shape, km, "a");
+    wire(&mut g, small, km, "b");
+    set(&mut g, km, "op", graph::ParamValue::Choice(1));
+    wire(&mut g, km, out, "image");
+    let px = s.frame(&g, out);
+    let ring = pixel(
+        &px,
+        SIZE.0 / 2,
+        SIZE.1 / 2 - (0.6 * SIZE.1 as f32 / 2.0) as u32,
+    );
+    assert!(centre(&px)[0] < 10, "hole {:?}", centre(&px));
+    assert!(ring[0] > 245, "ring {:?}", ring);
+
+    // Gradient Mask: dark on the left, bright on the right.
+    let grad = add(&mut g, &kind("mask_gradient.wgsl"));
+    wire(&mut g, grad, out, "image");
+    let px = s.frame(&g, out);
+    assert!(
+        left(&px)[0] < 80 && right(&px)[0] > 175,
+        "{:?} {:?}",
+        left(&px),
+        right(&px)
+    );
+
+    // Keys, as a layer over blue.
+    let blue = picture_node(&mut g, "kblue", |_, _| [0, 0, 255, 255]);
+    // Left: green screen. Middle: greenish grey (spill). Right: red.
+    let shot = picture_node(&mut g, "kshot", |x, _| match x {
+        0..21 => [25, 190, 64, 255],
+        21..43 => [120, 170, 120, 255],
+        _ => [230, 20, 20, 255],
+    });
+    let chroma = add(&mut g, &kind("mask_chroma_key.wgsl"));
+    wire(&mut g, shot, chroma, "input");
+    let mix = add(&mut g, registry::LAYER_MIXER);
+    wire(&mut g, blue, mix, &registry::layer_port(1));
+    wire(&mut g, chroma, mix, &registry::layer_port(2));
+    wire(&mut g, mix, out, "image");
+    s.settle(&g, out, &[blue, shot]);
+    let px = s.frame(&g, out);
+    assert!(
+        left(&px)[2] > 240 && left(&px)[1] < 20,
+        "keyed {:?}",
+        left(&px)
+    );
+    assert!(right(&px)[0] > 220, "kept {:?}", right(&px));
+    let m = mid(&px);
+    assert!(m[2] < 200, "the grey stays {:?}", m);
+    assert!((m[1] as i32 - m[0] as i32) < 30, "spill removed {:?}", m);
+
+    // Luma Key: keep the bright parts (red and green are bright enough,
+    // a dark picture is not).
+    let dark = picture_node(&mut g, "kdark", |x, _| {
+        if x < 32 {
+            [250, 250, 250, 255]
+        } else {
+            [20, 20, 20, 255]
+        }
+    });
+    let luma = add(&mut g, &kind("mask_luma_key.wgsl"));
+    wire(&mut g, dark, luma, "input");
+    wire(&mut g, luma, mix, &registry::layer_port(2));
+    s.settle(&g, out, &[dark]);
+    let px = s.frame(&g, out);
+    assert!(left(&px)[0] > 240, "bright kept {:?}", left(&px));
+    assert!(
+        right(&px)[2] > 240 && right(&px)[0] < 20,
+        "dark keyed {:?}",
+        right(&px)
+    );
+}
+
+#[test]
+fn motion_mask_lights_up_where_the_picture_changes() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    let black = picture_node(&mut g, "mblack", |_, _| [0, 0, 0, 255]);
+    let white = picture_node(&mut g, "mwhite", |_, _| [255; 4]);
+    let mix = add(&mut g, registry::LAYER_MIXER);
+    wire(&mut g, black, mix, &registry::layer_port(1));
+    wire(&mut g, white, mix, &registry::layer_port(2));
+    let motion = add(&mut g, &registry::shader_kind("mask_motion.wgsl"));
+    set(&mut g, motion, "trail", graph::ParamValue::Float(0.0));
+    wire(&mut g, mix, motion, "input");
+    wire(&mut g, motion, out, "image");
+    s.settle(&g, out, &[black, white]);
+    s.frame(&g, out);
+    let centre = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
+    let px = s.frame(&g, out);
+    assert!(centre(&px)[0] < 10, "still: {:?}", centre(&px));
+    // The white layer goes away: everything changed this frame.
+    set(
+        &mut g,
+        mix,
+        &registry::layer_param("mute", 2),
+        graph::ParamValue::Bool(true),
+    );
+    let px = s.frame(&g, out);
+    assert!(centre(&px)[0] > 245, "moved: {:?}", centre(&px));
+    let px = s.frame(&g, out);
+    assert!(centre(&px)[0] < 10, "still again: {:?}", centre(&px));
+}

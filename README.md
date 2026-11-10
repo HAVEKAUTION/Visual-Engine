@@ -1,7 +1,7 @@
 # Visual Engine (working title)
 
-**Live visuals that listen to the music.** A free, open-source desktop app for Windows
-and macOS. It analyses sound in real time (kicks, snares, hats, tempo, builds, drops)
+**Live visuals that listen to the music.** A free, open-source desktop app for
+Windows. It analyses sound in real time (kicks, snares, hats, tempo, builds, drops)
 and lets that drive anything you see. Your own photos, videos, webcams and shaders are
 all wired together in one node graph, in the style of DaVinci Resolve.
 
@@ -31,7 +31,8 @@ not just alongside it.
   use the modulation editor (curves, beat envelopes, LFOs locked to the bar, steps).
 - **Compositing.** All 21 Photoshop-style blend modes (Screen, Multiply, Overlay,
   Hard Light, Colour, Luminosity…). A Layer Mixer with solo, mute and reorder. A mask
-  plug on every node.
+  plug on every node, with Shape and Gradient masks that pulse to the beat, Luma and
+  Chroma (green screen) keys, a Motion Mask that follows movement, and a Key Mixer.
 - **Media.** Pictures, video files (loop, ping-pong, beat-locked, scrub, stutter) and
   live webcams. Movement, brightness and colour seen in a video or camera become
   signals too.
@@ -43,8 +44,9 @@ Coming next is listed in the [Roadmap](#roadmap).
 
 ## Install (build from source)
 
-You only need two things: **Rust** (the programming language the app is written in)
-and, for video files, **ffmpeg**. Building takes 5–10 minutes the first time and
+It runs on **Windows 10 and 11** (macOS isn't supported). You need two things:
+**Rust** (the programming language the app is written in) and, for video files,
+**ffmpeg**. Building takes 5–10 minutes the first time and
 seconds after that.
 
 ### Windows 10 / 11
@@ -65,23 +67,6 @@ seconds after that.
    ```
    cargo run --release
    ```
-
-### macOS (Apple Silicon or Intel)
-
-1. Open **Terminal** and install Apple's command-line tools:
-   `xcode-select --install`
-2. Install Rust:
-   `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-   then close and reopen Terminal.
-3. Optional, for video files: install [Homebrew](https://brew.sh), then run
-   `brew install ffmpeg`
-4. Get the code: `git clone https://github.com/HAVEKAUTION/Visual-Engine.git`
-   then `cd Visual-Engine`
-5. Run it: `cargo run --release`
-
-The first time you start a camera or microphone, macOS asks for permission. Say yes,
-or turn it on later in *System Settings → Privacy & Security*. Hearing "computer
-audio" needs macOS 14.2 or newer.
 
 ### Handy extras
 
@@ -149,7 +134,10 @@ it does.
 - **Sound source:** in the Media panel on the left, scroll down past the pictures to
   **Open song…**, the live inputs, and **Computer audio**.
 - **Settings for a node:** click the node in the graph. Its settings appear in the
-  **Inspector** on the right.
+  **Inspector** on the right, with a short "How to use" note and buttons to add an
+  effect, a layer or a mask. With nothing selected, the Inspector shows getting-started
+  steps.
+- **Right-click a node** for everything you can do with it.
 - Press **?** for every keyboard shortcut. **Tab** hides or shows the graph, and
   **F11** goes fullscreen.
 
@@ -161,12 +149,12 @@ Done:
 - the analysis engine;
 - the node graph and workspace;
 - media (pictures, video, cameras);
-- blend modes and the Layer Mixer.
+- blend modes, the Layer Mixer, masks and keys.
 
 Next, roughly in order:
 
-1. **Compositing, part 2.** Luma and chroma keys, shape, gradient and motion masks,
-   and Transform and Corner Pin handles you drag in the viewer.
+1. **Compositing, last part.** Transform and Corner Pin handles you drag in the
+   viewer, and a demo project.
 2. **UI pass.** Dockable panels you can drag, float and tab (like Adobe apps), saved
    layouts, user themes, a clearer sources panel, and bolder Resolve-style looks.
 3. **Looks and the full node library.** Signature looks you can mutate and breed,

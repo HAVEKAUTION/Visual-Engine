@@ -37,7 +37,7 @@ vice versa.
 ---
 
 
-A native desktop app (Windows + macOS) for live, music-driven visuals. Audio, images,
+A native desktop app for Windows (macOS dropped 2026-11-10) for live, music-driven visuals. Audio, images,
 video files and live cameras all flow through **one node graph** (inspired by
 DaVinci Resolve's Color/Fusion nodes, simplified). Performable live (keyboard, MIDI,
 fully automatic), streamable (Spout/Syphon/NDI) and exportable (4K video).
@@ -56,7 +56,7 @@ to exist.
 - Keep `TESTING.md` (checklist per milestone) and `CHANGELOG.md` up to date.
 - Before handing over: `cargo fmt`, `cargo clippy -- -D warnings`, `cargo test` pass.
 - Commit after each working step. Never leave the project not building.
-- Installs or settings the user must do: step-by-step for Windows and macOS.
+- Installs or settings the user must do: step-by-step for Windows.
 - One milestone (or part of one) per task. Don't build later milestones early.
 - If this brief conflicts with existing code, **say so and propose a migration**
   before rewriting anything large.
@@ -410,6 +410,12 @@ docking, polish) → M6 … Desktop mode ships with the M8 outputs.
 - **Stems and sampling** (ideas bank, after release): split a song into
   drums / bass / vocals / other (an ONNX source-separation model, offline) so each
   stem gets its own signals, and slice samples from it. Too big for now.
+
+**Decided 2026-11-10 (after M5 part 1)**
+- **Windows only.** No macOS work. A web version might come one day; not a goal.
+- **Everything findable:** all features reachable from the Inspector or a right-click
+  menu; shortcuts are extras. Each node has a short "How to use" note, and the
+  Inspector shows getting-started steps when nothing is selected.
 
 ## Ideas bank (do NOT build until asked)
 Lyric/typography tracks synced to the song · Spotify Canvas & TikTok loop export ·

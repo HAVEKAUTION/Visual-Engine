@@ -316,6 +316,37 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M5 part 2 – Masks, keys, everything findable
+
+Run: `cargo run --release -p app` (close any running copy first)
+
+**Finding things**
+- [ ] Click empty graph space (nothing selected): the Inspector on the right shows
+      **Getting started** with five steps.
+- [ ] Click a picture node: under its name are **+ Effect**, **+ Layer** and **◐ Mask**
+      buttons and a **How to use** note.
+- [ ] Right-click a picture node: the menu starts with *Add effect after*, *Add a layer
+      on top*, *Mask this node* and *Add a parallel branch*, each with a list to pick
+      from.
+
+**Masks**
+- [ ] Picture node → ◐ Mask → **Shape Mask**: the picture shows only inside a circle,
+      and the Inspector says "Masked by Shape Mask". Select the Shape Mask, try Star,
+      Ring, Soft edge, Invert. Play a song and raise **Pulse on kick**: the shape pumps.
+- [ ] ◐ Mask → **Gradient Mask**: the picture fades across the screen. Try Round,
+      Bands 6 with Repeat, Scroll speed.
+- [ ] Back on the picture node, press **✕** next to "Masked by": the mask comes off.
+
+**Keys**
+- [ ] Camera node → + Effect → **Chroma Key**. In front of something green (a green
+      t-shirt or paper works), the green turns see-through. Raise Tolerance until it's
+      clean, then put the key on a layer over a scene (+ Layer on the scene).
+- [ ] A picture with a black background → + Effect → **Luma Key**: the black goes
+      see-through in a Layer Mixer.
+- [ ] Camera node → ◐ Mask → **Motion Mask**: only the parts that move show. Raise
+      Trail for streaks.
+- [ ] **Key Mixer**: two Shape Masks (big and small) into A and B, Subtract: a ring.
+
 ## v2 M5 part 1 – Blend modes, masks, Layer Mixer
 
 Run: `cargo run --release -p app` (close any running copy first)

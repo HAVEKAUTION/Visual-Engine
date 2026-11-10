@@ -1,5 +1,6 @@
 //! The built-in scenes and effects, embedded in the binary. Effects are the
-//! `fx_*.wgsl` files (`"kind": "effect"`).
+//! `fx_*.wgsl` files (`"kind": "effect"`); masks and keys are the
+//! `mask_*.wgsl` files.
 
 pub struct Builtin {
     pub file_name: &'static str,
@@ -74,5 +75,29 @@ pub const BUILTIN: &[Builtin] = &[
     Builtin {
         file_name: "fx_pixelate.wgsl",
         source: include_str!("../shaders/fx_pixelate.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_shape.wgsl",
+        source: include_str!("../shaders/mask_shape.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_gradient.wgsl",
+        source: include_str!("../shaders/mask_gradient.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_luma_key.wgsl",
+        source: include_str!("../shaders/mask_luma_key.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_chroma_key.wgsl",
+        source: include_str!("../shaders/mask_chroma_key.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_motion.wgsl",
+        source: include_str!("../shaders/mask_motion.wgsl"),
+    },
+    Builtin {
+        file_name: "mask_key_mixer.wgsl",
+        source: include_str!("../shaders/mask_key_mixer.wgsl"),
     },
 ];

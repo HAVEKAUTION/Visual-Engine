@@ -64,8 +64,9 @@ fn built_in_scenes_draw_something() {
     };
     let mut r = Renderer::new(&device, &queue);
     for b in scenes::builtin::BUILTIN {
-        // Effects need a picture plugged in; the graph tests cover them.
-        if b.file_name.starts_with("fx_") {
+        // Effects and keys need a picture plugged in; the graph tests
+        // cover them (and the masks).
+        if b.file_name.starts_with("fx_") || b.file_name.starts_with("mask_") {
             continue;
         }
         r.clear_feedback(0);

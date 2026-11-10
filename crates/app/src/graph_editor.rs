@@ -82,6 +82,7 @@ pub fn category_colour(c: Category) -> Color32 {
     match c {
         Category::Source => Color32::from_rgb(70, 190, 180),
         Category::Effect => Color32::from_rgb(160, 120, 255),
+        Category::Mask => port_colour(PortType::Mask),
         Category::Signal => port_colour(PortType::Signal),
         Category::Trigger => port_colour(PortType::Trigger),
         Category::Output => ACCENT,
@@ -417,6 +418,8 @@ enum Insert {
     Parallel(NodeId),
     /// L: on top of this node, by a new Merge.
     Layer(NodeId),
+    /// Into this node's Mask plug.
+    Mask(NodeId),
     /// Dropped a wire on empty space: plug it into the new node.
     FromWire(OutputRef, PortType),
 }
@@ -445,6 +448,145 @@ struct Clip {
 }
 
 const CLIP_TAG: &str = "visual-engine-nodes ";
+
+/// Ways to add a node next to a picture node (node right-click menu,
+/// Inspector buttons, S / L / P keys).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddHow {
+    /// After it, taking over where it went (S).
+    After,
+    /// On top of it in a Layer Mixer (L).
+    Layer,
+    /// Beside it on the same input, mixed 50/50 (P).
+    Parallel,
+    /// Into its Mask plug.
+    Mask,
+}
+
+impl AddHow {
+    pub const ALL: [AddHow; 4] = [AddHow::After, AddHow::Layer, AddHow::Mask, AddHow::Parallel];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AddHow::After => "Add effect after",
+            AddHow::Layer => "Add a layer on top",
+            AddHow::Mask => "Mask this node",
+            AddHow::Parallel => "Add a parallel branch",
+        }
+    }
+
+    pub fn hint(self) -> &'static str {
+        match self {
+            AddHow::After => "Puts an effect after this node (key S)",
+            AddHow::Layer => {
+                "Stacks a picture, video, camera or scene on top with a Layer Mixer (key L)"
+            }
+            AddHow::Mask => "Shows this node only inside a shape, ramp, key or picture",
+            AddHow::Parallel => "An effect on the same input, mixed 50/50 with this node (key P)",
+        }
+    }
+
+    fn insert(self, id: NodeId) -> Insert {
+        match self {
+            AddHow::After => Insert::Serial(id),
+            AddHow::Layer => Insert::Layer(id),
+            AddHow::Parallel => Insert::Parallel(id),
+            AddHow::Mask => Insert::Mask(id),
+        }
+    }
+}
+
+/// Menu entry that adds a picture or video file (opens a file dialog).
+pub const PICK_FILE: &str = "pick-file";
+
+/// The items of one "add next to this node" menu. Returns the chosen node
+/// type (`None` inside = open the search box; `PICK_FILE` = a file).
+pub fn add_items(
+    ui: &mut egui::Ui,
+    catalogue: &[CatalogueEntry],
+    how: AddHow,
+) -> Option<Option<String>> {
+    let mut pick = None;
+    ui.label(egui::RichText::new(how.hint()).small().color(TEXT_DIM));
+    if ui.button("🔍 Search all…").clicked() {
+        pick = Some(None);
+    }
+    fn list(
+        ui: &mut egui::Ui,
+        pick: &mut Option<Option<String>>,
+        catalogue: &[CatalogueEntry],
+        title: &str,
+        pred: &dyn Fn(&CatalogueEntry) -> bool,
+    ) {
+        let items: Vec<&CatalogueEntry> = catalogue.iter().filter(|e| pred(e)).collect();
+        if items.is_empty() {
+            return;
+        }
+        ui.separator();
+        ui.label(egui::RichText::new(title).small().color(TEXT_DIM));
+        for e in items {
+            let text = egui::RichText::new(&e.label).color(category_colour(e.category));
+            if ui.button(text).on_hover_text(&e.description).clicked() {
+                *pick = Some(Some(e.kind.clone()));
+            }
+        }
+    }
+    let file_button = |ui: &mut egui::Ui, pick: &mut Option<Option<String>>| {
+        if ui
+            .button("🖼 Picture or video file…")
+            .on_hover_text("Pick a file from your computer")
+            .clicked()
+        {
+            *pick = Some(Some(PICK_FILE.to_string()));
+        }
+    };
+    let effect = |e: &CatalogueEntry| {
+        e.category == Category::Effect && e.inputs.first() == Some(&PortType::Image)
+    };
+    let key = |e: &CatalogueEntry| e.category == Category::Mask && !e.inputs.is_empty();
+    match how {
+        AddHow::After | AddHow::Parallel => {
+            list(ui, &mut pick, catalogue, "Effects", &effect);
+            list(ui, &mut pick, catalogue, "Keys and cut-outs", &key);
+        }
+        AddHow::Layer => {
+            file_button(ui, &mut pick);
+            list(
+                ui,
+                &mut pick,
+                catalogue,
+                "Live and scenes",
+                &|e: &CatalogueEntry| {
+                    e.category == Category::Source
+                        && e.kind != registry::IMAGE
+                        && e.kind != registry::VIDEO
+                },
+            );
+        }
+        AddHow::Mask => {
+            list(
+                ui,
+                &mut pick,
+                catalogue,
+                "Shapes and ramps",
+                &|e: &CatalogueEntry| e.category == Category::Mask && e.inputs.is_empty(),
+            );
+            list(
+                ui,
+                &mut pick,
+                catalogue,
+                "From this node's own picture",
+                &key,
+            );
+            ui.separator();
+            file_button(ui, &mut pick);
+        }
+    }
+    if pick.is_some() {
+        ui.close();
+    }
+    pick
+}
 
 pub struct Editor {
     pan: Vec2,
@@ -479,6 +621,9 @@ pub struct Editor {
     pub pending_media: Vec<(MediaDrop, Pos2)>,
     /// Where the graph was drawn last frame (screen).
     pub last_rect: Rect,
+    /// Add a node next to another, asked for outside the graph (Inspector):
+    /// (next to, how, type or None = search).
+    pub pending_add: Option<(NodeId, AddHow, Option<String>)>,
 }
 
 impl Default for Editor {
@@ -504,6 +649,7 @@ impl Default for Editor {
             node_scale: DEFAULT_NODE_SCALE,
             pending_media: Vec::new(),
             last_rect: Rect::NOTHING,
+            pending_add: None,
         }
     }
 }
@@ -1130,6 +1276,10 @@ impl Editor {
             .filter(|n| n.makes_image())
             .collect();
         let thumbs_hidden = (!pics.is_empty()).then(|| pics.iter().all(|n| n.hide_thumb));
+        // One picture node (not the output) right-clicked: offer the add menus.
+        let one_picture = (pics.len() == 1 && selected_count == 1)
+            .then(|| pics[0].id)
+            .filter(|id| c.graph.node(*id).is_some_and(|n| !n.outputs.is_empty()));
         resp.context_menu(|ui| {
             action = match &menu_target {
                 Hit::None => add_menu(ui, c.catalogue, selected_count),
@@ -1137,7 +1287,13 @@ impl Editor {
                 Hit::Group(id) | Hit::GroupToggle(id) | Hit::Macro(id, _) => {
                     c.graph.group(*id).and_then(|g| group_menu(ui, g))
                 }
-                _ => node_menu(ui, selected_count, in_group.is_some(), thumbs_hidden),
+                _ => node_menu(
+                    ui,
+                    selected_count,
+                    in_group.is_some(),
+                    thumbs_hidden,
+                    one_picture.map(|_| c.catalogue),
+                ),
             };
         });
 
@@ -1159,7 +1315,9 @@ impl Editor {
                         type_name(def.ty)
                     );
                     if def.ty == PortType::Mask {
-                        t += "\nLimits where this node's effect shows (masks arrive in M5).";
+                        t += "\nWhite shows this node, black hides it (an effect shows its \
+                              input there instead). Plug in a Shape or Gradient Mask, a key, or \
+                              any picture. Right-click the node → Mask this node.";
                     }
                     Some(t)
                 }),
@@ -1343,6 +1501,9 @@ impl Editor {
             && let Some(drop) = egui::DragAndDrop::take_payload::<MediaDrop>(ui.ctx())
         {
             self.pending_media.push(((*drop).clone(), p));
+        }
+        if let Some((id, how, kind)) = self.pending_add.take() {
+            self.add_next(ui, &mut c, id, how, kind);
         }
         for (what, at) in std::mem::take(&mut self.pending_media) {
             let at = if rect.contains(at) { at } else { rect.center() };
@@ -2348,7 +2509,11 @@ impl Editor {
         let q = s.text.to_lowercase();
         let fits = |e: &CatalogueEntry| match &s.insert {
             Insert::None => true,
-            Insert::Serial(_) => e.category == Category::Effect,
+            Insert::Serial(_) => {
+                e.category == Category::Effect
+                    || (e.category == Category::Mask && !e.inputs.is_empty())
+            }
+            Insert::Mask(_) => matches!(e.category, Category::Mask | Category::Source),
             Insert::Parallel(_) | Insert::Layer(_) => {
                 matches!(e.category, Category::Source | Category::Effect)
             }
@@ -2388,6 +2553,7 @@ impl Editor {
             Insert::Serial(_) => "Insert after (S)",
             Insert::Parallel(_) => "Add in parallel (P)",
             Insert::Layer(_) => "Add as a layer on top (L)",
+            Insert::Mask(_) => "Mask this node with…",
             Insert::FromWire(..) => "Add a node on this wire",
         };
         let mut chosen = None;
@@ -2529,6 +2695,43 @@ impl Editor {
                 cmds.push(Command::Connect(Link::new(
                     OutputRef::new(after, &src_out),
                     Endpoint::input(new, &input),
+                )));
+            }
+            Insert::Mask(target) => {
+                let Some(out) = image_out else { return };
+                let Some(t) = c.graph.node(target).cloned() else {
+                    return;
+                };
+                cmds.push(Command::Move {
+                    node: new,
+                    pos: [t.pos[0] - NODE_W - 48.0, t.pos[1] + 170.0],
+                });
+                // Keys and Motion Mask look at the same picture the node gets.
+                if let Some(input) = &first_image
+                    && let Some(src) = t
+                        .inputs
+                        .iter()
+                        .find(|p| p.ty == PortType::Image)
+                        .and_then(|p| c.graph.input_link(target, &p.name))
+                {
+                    cmds.push(Command::Connect(Link::new(
+                        src.from.clone(),
+                        Endpoint::input(new, input),
+                    )));
+                }
+                // Keys give black & white when they're used as a mask.
+                if let Some(p) = node.param("output")
+                    && let Some(i) = p.def.options.iter().position(|o| o.starts_with("Black"))
+                {
+                    cmds.push(Command::SetParam {
+                        node: new,
+                        param: "output".into(),
+                        value: ParamValue::Choice(i as u32),
+                    });
+                }
+                cmds.push(Command::Connect(Link::new(
+                    OutputRef::new(new, &out),
+                    Endpoint::input(target, graph::MASK_PORT),
                 )));
             }
             Insert::Parallel(beside) | Insert::Layer(beside) => {
@@ -2731,6 +2934,77 @@ impl Editor {
     }
 
     fn add_node(&mut self, ui: &egui::Ui, c: &mut Ctx, kind: &str, at: Pos2) -> Option<NodeId> {
+        self.add_node_with(ui, c, kind, at, |_| {})
+    }
+
+    /// Add a node next to `target` (see [`AddHow`]). `kind` None opens the
+    /// search box; [`PICK_FILE`] asks for a picture or video file first.
+    pub fn add_next(
+        &mut self,
+        ui: &egui::Ui,
+        c: &mut Ctx,
+        target: NodeId,
+        how: AddHow,
+        kind: Option<String>,
+    ) {
+        let Some(t) = c.graph.node(target) else {
+            return;
+        };
+        self.menu_at = pos2(t.pos[0] + NODE_W * 1.5 + 48.0, t.pos[1] + HEADER_H * 0.5);
+        self.selected = BTreeSet::from([target]);
+        let insert = how.insert(target);
+        let Some(mut kind) = kind else {
+            self.open_search_with(ui.ctx(), insert);
+            return;
+        };
+        let mut file = None;
+        if kind == PICK_FILE {
+            let Some(path) = rfd::FileDialog::new()
+                .set_title("Pick a picture or video")
+                .add_filter(
+                    "Pictures and videos",
+                    &[media::IMAGE_EXTS, media::VIDEO_EXTS].concat(),
+                )
+                .pick_file()
+            else {
+                return;
+            };
+            kind = match media::kind_of(&path) {
+                Some(media::Kind::Video) => registry::VIDEO,
+                Some(media::Kind::Image) => registry::IMAGE,
+                _ => return self.say(ui, "That isn't a picture or a video I can open."),
+            }
+            .to_string();
+            file = Some(path);
+        }
+        let at = self.menu_at;
+        let added = self.add_node_with(ui, c, &kind, at, |n| {
+            if let Some(path) = &file {
+                if let Some(p) = n.param_mut(registry::FILE_PARAM) {
+                    p.value = ParamValue::Text(path.display().to_string());
+                }
+                if let Some(stem) = path.file_stem() {
+                    n.label = truncate(&stem.to_string_lossy(), 20);
+                }
+            }
+        });
+        if let Some(id) = added {
+            let screen = ui
+                .ctx()
+                .pointer_hover_pos()
+                .unwrap_or_else(|| ui.ctx().content_rect().center());
+            self.wire_new(ui, c, id, insert, screen);
+        }
+    }
+
+    fn add_node_with(
+        &mut self,
+        ui: &egui::Ui,
+        c: &mut Ctx,
+        kind: &str,
+        at: Pos2,
+        tweak: impl FnOnce(&mut Node),
+    ) -> Option<NodeId> {
         let spec = match registry::spec_for(kind, c.library) {
             Ok(s) => s,
             Err(e) => {
@@ -2739,6 +3013,7 @@ impl Editor {
             }
         };
         let mut n = c.graph.new_node(&spec);
+        tweak(&mut n);
         n.pos = [
             snap(at.x - NODE_W * 0.5, self.snap),
             snap(at.y - HEADER_H * 0.5, self.snap),
@@ -2801,6 +3076,11 @@ impl Editor {
             MenuAction::Add(kind) => {
                 let at = self.menu_at;
                 self.add_node(ui, c, &kind, at);
+            }
+            MenuAction::AddNext(how, kind) => {
+                if let Some(&id) = sel.first() {
+                    self.add_next(ui, c, id, how, kind);
+                }
             }
             MenuAction::Delete => {
                 if sel.is_empty() {
@@ -3158,6 +3438,7 @@ struct Keys {
 #[derive(Clone, Debug, PartialEq)]
 enum MenuAction {
     Add(String),
+    AddNext(AddHow, Option<String>),
     Delete,
     Bypass,
     Colour(Option<[u8; 3]>),
@@ -3266,9 +3547,20 @@ fn node_menu(
     count: usize,
     in_group: bool,
     thumbs_hidden: Option<bool>,
+    add: Option<&[CatalogueEntry]>,
 ) -> Option<MenuAction> {
     let mut pick = None;
     let s = if count > 1 { "s" } else { "" };
+    if let Some(catalogue) = add {
+        for how in AddHow::ALL {
+            ui.menu_button(how.label(), |ui| {
+                if let Some(kind) = add_items(ui, catalogue, how) {
+                    pick = Some(MenuAction::AddNext(how, kind));
+                }
+            });
+        }
+        ui.separator();
+    }
     ui.label(egui::RichText::new("Colour").small().color(TEXT_DIM));
     if let Some(c) = swatches(ui, true) {
         pick = Some(MenuAction::Colour(c));

@@ -16,7 +16,8 @@ maths) and records what in the code is now **legacy**.
 
 ---
 
-A native desktop app (Windows + macOS) for live, music-driven visuals. Audio, images,
+A native desktop app for **Windows** for live, music-driven visuals (macOS dropped on
+2026-11-10, see below). Audio, images,
 video files and live cameras flow through **one node graph** (DaVinci Resolve-inspired,
 simplified). Built for live VJ sets (keyboard, MIDI, fully automatic), stream output
 and 4K video export.
@@ -35,7 +36,15 @@ and 4K video export.
 - Commit after each working step with a clear message. Never leave the project in a
   state that doesn't build.
 - If something needs the user to install or click something, give step-by-step
-  instructions for both Windows and macOS.
+  instructions for Windows.
+- **Platform (decided 2026-11-10): Windows only.** Don't spend effort on macOS (no
+  macOS testing, instructions or features such as Syphon). Keep code portable where
+  it costs nothing, since a web port may happen one day, but that isn't a goal either.
+  The goal is a complete, polished program that runs well and efficiently on the
+  user's machine.
+- **Everything findable (user, 2026-11-10):** every feature must be reachable from the
+  Inspector or by right-clicking (a node, a plug, the graph). Keyboard shortcuts are
+  extras, never the only way. New nodes get a "How to use" note (`app/src/tips.rs`).
 - If the brief conflicts with existing code, say so and propose a migration before
   rewriting anything large.
 
@@ -160,7 +169,8 @@ default **off**.
 
 **Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`** (plus the
 "v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
-built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4. Next up: **M5 compositing**
+built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5 parts 1–2. Next up: **M5 part 3** (Transform / Corner Pin handles
+in the viewer, the compositing demo)
 (BUILD_STEPS_v2 Step 4). Then the M3b UI pass (themes, docking). No Twitch.
 
 Done so far (v1 numbering, kept for history):

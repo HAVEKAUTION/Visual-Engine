@@ -22,6 +22,7 @@ use signals::modulation::Source;
 use crate::graph_editor::{self, ACCENT, Editor, GROUP_COLOUR, port_colour};
 use crate::media_pool::{MediaPool, PoolAction};
 use crate::mod_editor::{self, MOD_COLOR, SIGNAL_SOURCES};
+use crate::tips;
 
 const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
 const ERROR_COLOR: Color32 = Color32::from_rgb(255, 110, 110);
@@ -433,12 +434,7 @@ impl Workspace {
         let id = match (self.editor.selected.len(), self.editor.selected.first()) {
             (1, Some(id)) => *id,
             (0, _) => {
-                empty_state(
-                    ui,
-                    "Nothing selected.",
-                    "Click a node to tweak it here. Right-click the graph below to add one, \
-                     then drag from a plug to wire it up.",
-                );
+                getting_started(ui);
                 return;
             }
             (k, _) => {
@@ -555,6 +551,27 @@ impl Workspace {
                     .on_hover_text("Smaller = faster. Good for blurry or soft layers.");
             }
         });
+        if node.makes_image() && !node.outputs.is_empty() {
+            self.add_next_ui(ui, id);
+            self.mask_row(ui, &node);
+        }
+        if let Some(text) = tips::for_node(
+            &node.kind,
+            registry::category_of(
+                &node.kind,
+                node.makes_image(),
+                node.inputs.iter().any(|p| p.ty == graph::PortType::Image),
+            ),
+        ) {
+            let open_first = registry::is_media_kind(&node.kind)
+                || registry::shader_file(&node.kind).is_some_and(registry::is_mask_file);
+            egui::CollapsingHeader::new(RichText::new("How to use").small().strong())
+                .id_salt(("howto", node.kind.as_str()))
+                .default_open(open_first)
+                .show(ui, |ui| {
+                    ui.label(RichText::new(text).small());
+                });
+        }
         ui.separator();
 
         if node.params.is_empty() {
@@ -578,6 +595,71 @@ impl Workspace {
         }
         if registry::is_media_kind(&node.kind) {
             self.video_signals_ui(ui, id);
+        }
+    }
+
+    /// Buttons that add a node next to this one (the same menus as
+    /// right-clicking the node).
+    fn add_next_ui(&mut self, ui: &mut egui::Ui, id: NodeId) {
+        use graph_editor::AddHow;
+        let mut pick = None;
+        ui.horizontal_wrapped(|ui| {
+            for (how, text) in [
+                (AddHow::After, "+ Effect"),
+                (AddHow::Layer, "+ Layer"),
+                (AddHow::Mask, "◐ Mask"),
+            ] {
+                ui.menu_button(RichText::new(text).strong(), |ui| {
+                    if let Some(kind) = graph_editor::add_items(ui, &self.catalogue, how) {
+                        pick = Some((how, kind));
+                    }
+                })
+                .response
+                .on_hover_text(how.hint());
+            }
+        });
+        if let Some((how, kind)) = pick {
+            self.editor.pending_add = Some((id, how, kind));
+        }
+    }
+
+    /// What masks this node, with a way to remove it.
+    fn mask_row(&mut self, ui: &mut egui::Ui, node: &graph::Node) {
+        if node.input(graph::MASK_PORT).is_none() {
+            return;
+        }
+        let Some(link) = self.graph.input_link(node.id, graph::MASK_PORT).cloned() else {
+            return;
+        };
+        let from = self
+            .graph
+            .node(link.from.node)
+            .map(|n| n.label.clone())
+            .unwrap_or_default();
+        let mut remove = false;
+        let mut show = false;
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("◐ Masked by {from}"))
+                    .small()
+                    .color(port_colour(graph::PortType::Mask)),
+            );
+            show = ui
+                .small_button("Select")
+                .on_hover_text("Select the mask node to change it")
+                .clicked();
+            remove = ui
+                .small_button("✕")
+                .on_hover_text("Take the mask off (the mask node stays)")
+                .clicked();
+        });
+        if show {
+            self.editor.selected = std::collections::BTreeSet::from([link.from.node]);
+        }
+        if remove {
+            let _ = self
+                .history
+                .exec(&mut self.graph, Command::Disconnect(link));
         }
     }
 
@@ -1464,7 +1546,7 @@ impl Workspace {
                     if let Some(k) = remove {
                         mods.remove(k);
                     }
-                    ui.menu_button("＋ Add modulation", |ui| {
+                    ui.menu_button("+ Add modulation", |ui| {
                         egui::ScrollArea::vertical()
                             .max_height(320.0)
                             .show(ui, |ui| {
@@ -1494,6 +1576,36 @@ impl Drop for Workspace {
     fn drop(&mut self) {
         self.save_now();
     }
+}
+
+/// The Inspector with nothing selected: how to get going.
+fn getting_started(ui: &mut egui::Ui) {
+    ui.add_space(8.0);
+    ui.label(
+        RichText::new("Getting started")
+            .size(16.0)
+            .color(Color32::from_gray(220)),
+    );
+    ui.label(
+        RichText::new("Click any node in the graph to see its settings here.")
+            .small()
+            .weak(),
+    );
+    ui.add_space(6.0);
+    for (title, body) in tips::GETTING_STARTED {
+        ui.label(RichText::new(*title).strong().color(ACCENT));
+        ui.label(RichText::new(*body).small());
+        ui.add_space(4.0);
+    }
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(
+            "Right-click works everywhere: on empty graph space to add nodes, on a node for \
+             everything you can do with it. Press ? for all keyboard shortcuts.",
+        )
+        .small()
+        .weak(),
+    );
 }
 
 fn empty_state(ui: &mut egui::Ui, title: &str, body: &str) {

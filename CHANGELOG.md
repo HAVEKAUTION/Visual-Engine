@@ -2,6 +2,30 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M5 part 2: masks, keys, everything findable
+- New **Masks & Keys** nodes (green in the menus):
+  - **Shape Mask**: circle, rectangle, polygon, star or ring, with a soft edge. It can
+    pulse on the kick or beat and spin with the music.
+  - **Gradient Mask**: straight, round, around a point or diamond, once or in bands.
+    It can scroll with the bass.
+  - **Luma Key**: cuts out the bright or dark parts of a picture.
+  - **Chroma Key**: green screen, with colour spill removed from the edges.
+  - **Motion Mask**: white where the picture moves, with trails.
+  - **Key Mixer**: combines two masks (add, subtract, intersect, difference).
+
+  The keys give either a cut-out picture (for layers) or black & white (for masks).
+- **Everything reachable without shortcuts:**
+  - Right-click a picture node for *Add effect after*, *Add a layer on top*, *Mask this
+    node* and *Add a parallel branch*.
+  - The Inspector has the same **+ Effect / + Layer / ◐ Mask** buttons, plus a
+    "Masked by …" row (select or remove the mask).
+  - Masking with a key sets it to black & white and feeds it the node's own picture.
+- **How to use** notes in the Inspector for media, masks, keys, the Layer Mixer and
+  each kind of node. **Getting started** steps when nothing is selected.
+- The "+" on the *Add modulation* buttons showed as an empty box; fixed.
+- GPU tests for every mask and key (including spill and motion).
+- Windows only from now on (docs updated).
+
 ## 2026-11-10 — Docs: README as a project page
 - README rewritten for people who find the project on GitHub. It covers:
   - what the app does, with a picture of nine scenes;

@@ -117,6 +117,7 @@ impl SceneView {
         let order: Vec<&str> = scenes::builtin::BUILTIN
             .iter()
             .map(|b| b.file_name)
+            .filter(|f| !f.starts_with("mask_"))
             .collect();
         let bank = presets
             .load_bank()
@@ -665,6 +666,8 @@ impl SceneView {
             .iter()
             // Effects (fx_*.wgsl) are added as layers, not picked as scenes.
             .filter(|e| scenes::SceneMeta::parse(&e.source, "x").map_or(true, |m| !m.is_effect()))
+            // Masks are nodes for the graph, not scenes to show.
+            .filter(|e| !e.file_name.starts_with("mask_"))
             .map(|e| {
                 let stem = e.file_name.trim_end_matches(".wgsl");
                 let (name, genres) = scenes::SceneMeta::parse(&e.source, stem)

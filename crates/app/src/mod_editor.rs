@@ -309,7 +309,7 @@ pub fn float_row(
                 if let Some(k) = remove {
                     mods.remove(k);
                 }
-                ui.menu_button("＋ Add modulation", |ui| {
+                ui.menu_button("+ Add modulation", |ui| {
                     egui::ScrollArea::vertical()
                         .max_height(320.0)
                         .show(ui, |ui| {
