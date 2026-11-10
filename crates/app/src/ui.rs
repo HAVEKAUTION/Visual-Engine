@@ -101,6 +101,7 @@ pub struct VisualEngineApp {
 
 impl VisualEngineApp {
     pub fn new(cc: &eframe::CreationContext<'_>, startup_song: Option<std::path::PathBuf>) -> Self {
+        crate::icons::install(&cc.egui_ctx);
         let prefs: Prefs = cc
             .storage
             .and_then(|s| eframe::get_value(s, PREFS_KEY))
@@ -302,7 +303,7 @@ impl VisualEngineApp {
         ui.horizontal(|ui| {
             let busy = self.loading.is_some();
             if ui
-                .add_enabled(!busy, egui::Button::new("📂 Open song…"))
+                .add_enabled(!busy, egui::Button::new("\u{E256} Open song…"))
                 .clicked()
             {
                 self.open_song_dialog();
@@ -331,9 +332,9 @@ impl VisualEngineApp {
 
             ui.horizontal(|ui| {
                 let label = if player.is_playing() {
-                    "⏸ Pause"
+                    "\u{E39E} Pause"
                 } else {
-                    "▶ Play"
+                    "\u{E3D0} Play"
                 };
                 if ui.button(label).clicked() {
                     player.toggle();
@@ -381,7 +382,7 @@ impl VisualEngineApp {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             if ui
-                .button("🔊 Sound & picture sync…")
+                .button("\u{E44A} Sound & picture sync…")
                 .on_hover_text(
                     "If the visuals feel early or late (Bluetooth speakers, a projector), set an offset here, or let the tap test find it.",
                 )
@@ -421,7 +422,11 @@ impl VisualEngineApp {
                         ui.selectable_value(&mut self.selected_input, Some(i), label);
                     }
                 });
-            if ui.button("⟳").on_hover_text("Rescan devices").clicked() {
+            if ui
+                .button("\u{E036}")
+                .on_hover_text("Rescan devices")
+                .clicked()
+            {
                 self.rescan_inputs();
             }
         });
@@ -430,7 +435,7 @@ impl VisualEngineApp {
         ui.horizontal_wrapped(|ui| {
             let can_start = self.selected_input.is_some();
             if ui
-                .add_enabled(can_start, egui::Button::new("🎤 Start input"))
+                .add_enabled(can_start, egui::Button::new("\u{E326} Start input"))
                 .clicked()
                 && let Some(device) = self
                     .selected_input
@@ -445,7 +450,10 @@ impl VisualEngineApp {
             }
             let computer = self.input_devices.iter().position(|d| d.loopback);
             if ui
-                .add_enabled(computer.is_some(), egui::Button::new("🔊 Computer audio"))
+                .add_enabled(
+                    computer.is_some(),
+                    egui::Button::new("\u{E44A} Computer audio"),
+                )
                 .on_hover_text(
                     "Listen to whatever this computer is playing (Spotify, YouTube, a DJ app…)",
                 )
@@ -461,7 +469,7 @@ impl VisualEngineApp {
                 }
             }
             if ui
-                .add_enabled(live_active, egui::Button::new("⏹ Stop"))
+                .add_enabled(live_active, egui::Button::new("\u{E46C} Stop"))
                 .clicked()
             {
                 self.engine.stop();
@@ -799,14 +807,14 @@ impl VisualEngineApp {
                     "GPU time each node takes, in milliseconds (needs a GPU that can measure it). At 60 fps the whole frame has 16.7 ms.",
                 );
                 if ui
-                    .add_enabled(ws.history.can_undo(), egui::Button::new("↶"))
+                    .add_enabled(ws.history.can_undo(), egui::Button::new("\u{E08A}"))
                     .on_hover_text("Undo (Ctrl+Z)")
                     .clicked()
                 {
                     let _ = ws.history.undo(&mut ws.graph);
                 }
                 if ui
-                    .add_enabled(ws.history.can_redo(), egui::Button::new("↷"))
+                    .add_enabled(ws.history.can_redo(), egui::Button::new("\u{E08C}"))
                     .on_hover_text("Redo (Ctrl+Shift+Z)")
                     .clicked()
                 {
@@ -849,7 +857,12 @@ impl VisualEngineApp {
 
     /// Pick a ready-made layout.
     fn layout_menu(&mut self, ui: &mut egui::Ui) {
-        let text = RichText::new(format!("Layout: {}", self.layout.name())).strong();
+        let text = RichText::new(format!(
+            "{} {}",
+            crate::icons::SQUARES_FOUR,
+            self.layout.name()
+        ))
+        .strong();
         ui.menu_button(text, |ui| {
             ui.label(
                 RichText::new("Drag any panel's tab to move it, split it or stack it.")
@@ -879,21 +892,24 @@ impl VisualEngineApp {
 
     /// Show or hide each panel.
     fn panels_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button(RichText::new("Panels").strong(), |ui| {
-            for pane in Pane::ALL {
-                let mut on = self.shown(pane);
-                if ui
-                    .checkbox(&mut on, pane.title())
-                    .on_hover_text(pane.hint())
-                    .changed()
-                {
-                    self.set_shown(pane, on);
+        ui.menu_button(
+            RichText::new(format!("{} Panels", crate::icons::SIDEBAR)).strong(),
+            |ui| {
+                for pane in Pane::ALL {
+                    let mut on = self.shown(pane);
+                    if ui
+                        .checkbox(&mut on, pane.title())
+                        .on_hover_text(pane.hint())
+                        .changed()
+                    {
+                        self.set_shown(pane, on);
+                    }
                 }
-            }
-            ui.separator();
-            ui.checkbox(&mut self.show_strip, "Signal strip")
-                .on_hover_text("Levels, hits, tempo and beat along the bottom");
-        })
+                ui.separator();
+                ui.checkbox(&mut self.show_strip, "Signal strip")
+                    .on_hover_text("Levels, hits, tempo and beat along the bottom");
+            },
+        )
         .response
         .on_hover_text("Show or hide panels");
     }

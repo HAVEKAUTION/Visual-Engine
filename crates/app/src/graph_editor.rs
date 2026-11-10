@@ -502,7 +502,7 @@ pub fn add_items(
             .small()
             .color(theme::text_weak()),
     );
-    if ui.button("🔍 Search all…").clicked() {
+    if ui.button("\u{E30C} Search all…").clicked() {
         pick = Some(None);
     }
     fn list(
@@ -527,7 +527,7 @@ pub fn add_items(
     }
     let file_button = |ui: &mut egui::Ui, pick: &mut Option<Option<String>>| {
         if ui
-            .button("🖼 Picture or video file…")
+            .button("\u{E2CA} Picture or video file…")
             .on_hover_text("Pick a file from your computer")
             .clicked()
         {
@@ -1325,7 +1325,7 @@ impl Editor {
                         .map(|e| e.description.clone())
                         .unwrap_or_default();
                     match c.eval.errors.get(&n) {
-                        Some(e) => format!("{desc}\n\n⚠ {e}"),
+                        Some(e) => format!("{desc}\n\n\u{E4E0} {e}"),
                         None => desc,
                     }
                 }),
@@ -1340,7 +1340,7 @@ impl Editor {
                     } else {
                         format!(
                             "Group \"{}\" · {n} nodes. Drag the title to move them all, \
-                             ▾ folds them into one box, double-click to rename.",
+                             \u{E136} folds them into one box, double-click to rename.",
                             g.label
                         )
                     }
@@ -1618,7 +1618,7 @@ impl Editor {
             painter.text(
                 title.left_center() + vec2(8.0 * z, 0.0),
                 Align2::LEFT_CENTER,
-                "▾",
+                "\u{E136}",
                 FontId::proportional((16.0 * z).clamp(8.0, 24.0)),
                 GROUP_COLOUR,
             );
@@ -1891,7 +1891,7 @@ impl Editor {
         painter.text(
             head.left_center() + vec2(8.0 * z, 0.0),
             Align2::LEFT_CENTER,
-            "▸",
+            "\u{E13A}",
             FontId::proportional((16.0 * z).clamp(8.0, 24.0)),
             GROUP_COLOUR,
         );
@@ -1904,7 +1904,7 @@ impl Editor {
         );
         let errors = b.members.iter().any(|m| c.eval.errors.contains_key(m));
         let right = if errors {
-            Some(("⚠".to_string(), theme::error()))
+            Some(("\u{E4E0}".to_string(), theme::error()))
         } else if self.show_cost
             && let Some(g) = c.gpu
         {
@@ -2126,11 +2126,11 @@ impl Editor {
             theme::text().gamma_multiply(dim),
         );
         let badge = if error.is_some() {
-            Some(("⚠", theme::error()))
+            Some(("\u{E4E0}", theme::error()))
         } else if n.bypass {
             Some(("off", theme::text_weak()))
         } else if c.viewed == Some(n.id) {
-            Some(("◉", theme::accent()))
+            Some(("\u{E220}", theme::accent()))
         } else {
             None
         };
@@ -3142,7 +3142,7 @@ impl Editor {
                             self.select_group(c.graph, id);
                             self.say(
                                 ui,
-                                "Grouped. ▾ on its title folds it into one box; Ctrl+Shift+G ungroups.",
+                                "Grouped. \u{E136} on its title folds it into one box; Ctrl+Shift+G ungroups.",
                             );
                         }
                         Err(e) => self.say(ui, e.to_string()),
@@ -3254,6 +3254,25 @@ impl Editor {
                                     "Demo added with {used} of your files. It can use 2 videos and 3 pictures: import more in the Media panel, choose a file on a muted layer's node and unmute it in Layers."
                                 ),
                             );
+                        }
+                    }
+                    Err(e) => self.say(ui, e),
+                }
+            }
+            MenuAction::Template(id) => {
+                match nodes::templates::build(id, c.library, &c.demo_media) {
+                    Ok((g, _)) => {
+                        let clip = Clip {
+                            nodes: g.nodes().to_vec(),
+                            links: g.links().to_vec(),
+                            frames: g.frames().to_vec(),
+                            groups: g.groups().to_vec(),
+                        };
+                        if let Ok(text) = ron::to_string(&clip) {
+                            self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
+                        }
+                        if let Some(t) = nodes::templates::find(id) {
+                            self.say(ui, format!("{}: {}", t.name, t.note));
                         }
                     }
                     Err(e) => self.say(ui, e),
@@ -3506,6 +3525,7 @@ enum MenuAction {
     Clear,
     Starter,
     CompositingDemo,
+    Template(&'static str),
     AddFrame,
     FrameColour(u32, [u8; 3]),
     RenameFrame(u32),
@@ -3559,6 +3579,32 @@ fn add_menu(
         ui.ctx()
             .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
     }
+    ui.menu_button(
+        format!("{} Templates (DJ sets)", crate::icons::FILM_STRIP),
+        |ui| {
+            ui.label(
+                egui::RichText::new(
+                    "Ready-made sets that change with the music. Each is ordinary nodes: \
+                     open them up and change anything.",
+                )
+                .small()
+                .weak(),
+            );
+            ui.separator();
+            for t in nodes::templates::ALL {
+                let hover = if t.uses.is_empty() {
+                    t.note.to_string()
+                } else {
+                    format!("{}\n\nUses {}.", t.note, t.uses)
+                };
+                if ui.button(t.name).on_hover_text(hover).clicked() {
+                    pick = Some(MenuAction::Template(t.id));
+                }
+            }
+        },
+    )
+    .response
+    .on_hover_text("Ready-made node layouts that look like a VJ set behind a DJ");
     if ui
         .button("Add starter graph")
         .on_hover_text("A small example to learn from")
@@ -3569,7 +3615,7 @@ fn add_menu(
     if ui
         .button("Add compositing demo")
         .on_hover_text(
-            "Your videos and pictures layered over a scene: blend modes, a pulsing star, a tilted card, scrolling bands. Uses up to 2 videos and 3 pictures from the Media panel, and your webcam (muted to start).",
+            "Your videos and pictures layered over a light tunnel: blend modes, a pulsing star, a tilted card, scrolling bands. Uses up to 2 videos and 3 pictures from the Media panel, and your webcam (muted to start).",
         )
         .clicked()
     {
@@ -3786,7 +3832,7 @@ fn help_overlay(painter: &egui::Painter, rect: Rect) {
         ("Ctrl+D", "bypass selected"),
         ("Ctrl+G, Ctrl+Shift+G", "group selected, ungroup"),
         (
-            "▾ / double-click a box",
+            "\u{E136} / double-click a box",
             "fold a group into a box / open it",
         ),
         ("Ctrl+C / X / V", "copy / cut / paste (between graphs too)"),

@@ -362,7 +362,7 @@ impl Workspace {
                 .and_then(label)
                 .map(|l| format!("Viewing {l}")),
             ViewerMode::Wipe => Some(match self.selected_picture().and_then(label) {
-                Some(l) => format!("◀ {l}   |   Program ▶"),
+                Some(l) => format!("\u{E138} {l}   |   Program \u{E13A}"),
                 None => "Wipe: select a node to compare it with the program".into(),
             }),
             ViewerMode::Program => None,
@@ -477,7 +477,7 @@ impl Workspace {
                         )
                         .small(),
                     );
-                    pick_folder = ui.button("📂 Look in a folder…").clicked();
+                    pick_folder = ui.button("\u{E256} Look in a folder…").clicked();
                     if let Some(note) = &self.relink_note {
                         ui.label(RichText::new(note).small().color(crate::theme::accent()));
                     }
@@ -565,14 +565,18 @@ impl Workspace {
         }
         if let Some(e) = self.eval.errors.get(&id) {
             ui.label(
-                RichText::new(format!("⚠ {e}"))
+                RichText::new(format!("\u{E4E0} {e}"))
                     .small()
                     .color(crate::theme::error()),
             );
         }
         ui.horizontal(|ui| {
             let mut on = !node.bypass;
-            let text = if on { "● On" } else { "○ Bypassed" };
+            let text = if on {
+                "\u{E676} On"
+            } else {
+                "\u{E674} Bypassed"
+            };
             if ui
                 .toggle_value(&mut on, text)
                 .on_hover_text("Ctrl+D. Bypassed nodes pass their picture straight through.")
@@ -672,7 +676,7 @@ impl Workspace {
             for (how, text) in [
                 (AddHow::After, "+ Effect"),
                 (AddHow::Layer, "+ Layer"),
-                (AddHow::Mask, "◐ Mask"),
+                (AddHow::Mask, "\u{E18C} Mask"),
             ] {
                 ui.menu_button(RichText::new(text).strong(), |ui| {
                     if let Some(kind) = graph_editor::add_items(ui, &self.catalogue, how) {
@@ -705,7 +709,7 @@ impl Workspace {
         let mut show = false;
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!("◐ Masked by {from}"))
+                RichText::new(format!("\u{E18C} Masked by {from}"))
                     .small()
                     .color(port_colour(graph::PortType::Mask)),
             );
@@ -714,7 +718,7 @@ impl Workspace {
                 .on_hover_text("Select the mask node to change it")
                 .clicked();
             remove = ui
-                .small_button("✕")
+                .small_button("\u{E4F6}")
                 .on_hover_text("Take the mask off (the mask node stays)")
                 .clicked();
         });
@@ -780,14 +784,14 @@ impl Workspace {
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
-                            .add_enabled(k > 0, egui::Button::new("▼").small())
+                            .add_enabled(k > 0, egui::Button::new("\u{E136}").small())
                             .on_hover_text("Move down (under the layer below)")
                             .clicked()
                         {
                             swap = Some((i, used[k - 1]));
                         }
                         if ui
-                            .add_enabled(k + 1 < used.len(), egui::Button::new("▲").small())
+                            .add_enabled(k + 1 < used.len(), egui::Button::new("\u{E13C}").small())
                             .on_hover_text("Move up (over the layer above)")
                             .clicked()
                         {
@@ -884,7 +888,7 @@ impl Workspace {
                 set_text(self, CAMERA_MODE_PARAM, String::new());
             }
             if ui
-                .small_button("⟳")
+                .small_button("\u{E036}")
                 .on_hover_text("Open the camera again and look for new ones (after replugging)")
                 .clicked()
             {
@@ -1057,9 +1061,9 @@ impl Workspace {
         });
         ui.horizontal(|ui| {
             let text = if missing {
-                "🔎 Find file…"
+                "\u{E30C} Find file…"
             } else {
-                "📂 Choose…"
+                "\u{E256} Choose…"
             };
             if ui.button(text).clicked() {
                 let exts: Vec<&str> = if video {
@@ -1092,7 +1096,7 @@ impl Workspace {
             if !empty
                 && !missing
                 && ui
-                    .small_button("⟳")
+                    .small_button("\u{E036}")
                     .on_hover_text("Read the file again (after editing it)")
                     .clicked()
             {
@@ -1112,7 +1116,7 @@ impl Workspace {
                 .any(|pp| pp.node == node && pp.param == param)
         });
         if published {
-            RichText::new(format!("◆ {label}")).color(GROUP_COLOUR)
+            RichText::new(format!("\u{E1EC} {label}")).color(GROUP_COLOUR)
         } else {
             RichText::new(label)
         }
@@ -1232,9 +1236,9 @@ impl Workspace {
         ui.label(RichText::new(info).small().weak());
         ui.horizontal(|ui| {
             let fold = if g.collapsed {
-                "▾ Open"
+                "\u{E136} Open"
             } else {
-                "▸ Fold into a box"
+                "\u{E13A} Fold into a box"
             };
             if ui.button(fold).clicked() {
                 put(
@@ -1297,7 +1301,7 @@ impl Workspace {
                         change = Some(ng);
                     }
                     if ui
-                        .add_enabled(i > 0, egui::Button::new("↑").small())
+                        .add_enabled(i > 0, egui::Button::new("\u{E08E}").small())
                         .clicked()
                     {
                         let mut ng = g.clone();
@@ -1305,7 +1309,10 @@ impl Workspace {
                         change = Some(ng);
                     }
                     if ui
-                        .add_enabled(i + 1 < g.published.len(), egui::Button::new("↓").small())
+                        .add_enabled(
+                            i + 1 < g.published.len(),
+                            egui::Button::new("\u{E03E}").small(),
+                        )
                         .clicked()
                     {
                         let mut ng = g.clone();
@@ -1313,7 +1320,7 @@ impl Workspace {
                         change = Some(ng);
                     }
                     if ui
-                        .small_button("✕")
+                        .small_button("\u{E4F6}")
                         .on_hover_text("Remove this knob (the setting stays)")
                         .clicked()
                     {
@@ -1551,7 +1558,7 @@ impl Workspace {
                 let mut m2 = m;
                 ui.checkbox(&mut m2.enabled, "");
                 ui.label(
-                    RichText::new(format!("⟵ {src}"))
+                    RichText::new(format!("\u{E058} {src}"))
                         .small()
                         .color(port_colour(graph::PortType::Signal)),
                 );
@@ -1591,7 +1598,11 @@ impl Workspace {
                         Some(&format!("w{}:{name}:{}", id.0, l.from.node.0)),
                     );
                 }
-                if ui.small_button("✕").on_hover_text("Unplug").clicked() {
+                if ui
+                    .small_button("\u{E4F6}")
+                    .on_hover_text("Unplug")
+                    .clicked()
+                {
                     let _ = self
                         .history
                         .exec(&mut self.graph, Command::Disconnect(l.clone()));

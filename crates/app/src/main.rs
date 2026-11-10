@@ -7,6 +7,7 @@ mod dock;
 mod graph_editor;
 mod graph_view;
 mod handles;
+mod icons;
 mod media_pool;
 mod mod_editor;
 mod offline;

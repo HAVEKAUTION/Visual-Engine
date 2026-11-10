@@ -2,6 +2,21 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M6 part 1: templates (DJ sets), Switch node, real icons
+- **Templates** (right-click the graph → Templates (DJ sets)): eight ready-made sets
+  that change with the music: Peak time, Warm-up, Your clips cut to the beat,
+  Kaleidoscope clip, Photo pulse, Logo on the kick, Glitch on the drop, Webcam
+  mirror. Each is ordinary nodes in a titled frame, with a note on what it does.
+  Templates that need media use yours from the Media panel, or stand-in scenes.
+- **Switch** node: up to four pictures, changing with a transition (Cut, Dissolve,
+  Wipe, Slide, Zoom through, Iris) whose length is in beats. Feed it a Beat Trigger
+  → Counter to change on time.
+- **Real icons** instead of emoji: the Phosphor icon set (MIT) is built in, used on
+  every button (open, play, pause, record, refresh, undo / redo, layouts, panels,
+  themes…). No more boxes or coloured emoji.
+- **Compositing demo re-toned:** a light tunnel underneath, Screen instead of Hard /
+  Soft Light, softer video, and a Glow + Colour Grade finish so it reads as one look.
+
 ## 2026-11-10 — v2 M3b part 2: themes, clearer tabs, bolder look (M3b done)
 - **Themes.** Toolbar → **Theme**: four built in (Ember, Graphite, Neon, High
   contrast with bigger text). **Edit colours…** changes any of 14 colours, the text

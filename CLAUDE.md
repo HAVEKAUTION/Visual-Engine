@@ -174,9 +174,11 @@ default **off**.
 "v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
 built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. M3b done (docking,
 layouts, Sources panel, themes in `app/src/theme.rs`: UI colours come from
-`theme::accent()` etc., never new hard-coded colours). Next up: **M6**
-(BUILD_STEPS_v2 Step 4), in parts. Ask the user which scene is the "round bubbling
-sharp" one they liked before making new scenes. No Twitch.
+`theme::accent()` etc., never new hard-coded colours). M6 part 1 done
+(templates in `nodes/src/templates.rs`, Switch node, Phosphor icons in
+`app/src/icons.rs`: never use emoji in the UI). Next up: **M6 part 2**: the user
+reviews the signature Looks pitch, then Looks + Look DNA. Ask the user which scene
+is the "round bubbling sharp" one they liked before making new scenes. No Twitch.
 
 Done so far (v1 numbering, kept for history):
 - M0 app shell, M1 analysis + meters, GATE (analysis on the user's songs): passed.

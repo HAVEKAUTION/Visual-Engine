@@ -280,7 +280,7 @@ impl AvSync {
             if let Some(r) = &self.result {
                 ui.label(RichText::new(r).small().color(theme::accent()));
             }
-            if ui.button("▶ Start the sync test").clicked() {
+            if ui.button("\u{E3D0} Start the sync test").clicked() {
                 match ClickTrack::start(INTERVAL) {
                     Ok(click) => {
                         self.error = None;
@@ -337,8 +337,8 @@ impl AvSync {
         }
         ui.horizontal(|ui| {
             if t.step == Step::Check {
-                stop = ui.button("✔ Done").clicked();
-                again = ui.button("⟳ Test again").clicked();
+                stop = ui.button("\u{E182} Done").clicked();
+                again = ui.button("\u{E036} Test again").clicked();
             } else {
                 stop = ui.button("Cancel").clicked();
             }

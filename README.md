@@ -36,6 +36,10 @@ not just alongside it.
   Chroma (green screen) keys, a Motion Mask that follows movement, and a Key Mixer.
   Move, scale, turn or corner-pin a picture by dragging handles in the viewer.
   Right-click the graph → *Add compositing demo* to see it all at once.
+- **Templates for a DJ set.** Right-click the graph → *Templates*: Peak time, Warm-up,
+  your clips cut to the beat, a logo on the kick, glitch on the drop and more. A
+  **Switch** node changes between pictures on the beat with dissolves, wipes, slides
+  or a zoom-through. Every template is ordinary nodes you can open up and change.
 - **Media.** Pictures, video files (loop, ping-pong, beat-locked, scrub, stutter) and
   live webcams. Movement, brightness and colour seen in a video or camera become
   signals too.
@@ -106,8 +110,9 @@ start the app (make a desktop shortcut to it if you like).
    **Open song…** and pick an MP3 / WAV / FLAC / OGG, or click **Computer audio**
    and play music in Spotify, YouTube or a DJ app. The meters along the bottom start
    moving, and the BPM appears after a few seconds.
-2. **See the demo.** Right-click the empty grey area of the **Node Graph** (bottom)
-   → **Add compositing demo**. The viewer fills with layered, beat-driven visuals.
+2. **Start a set.** Right-click the empty grey area of the **Node Graph** (bottom)
+   → **Templates (DJ sets)** → **Peak time**. The viewer changes scene every 2 bars,
+   in time with the music. Try the others too (Ctrl+Z removes one).
 3. **Use your own pictures.** Click the **Media** tab → **Import…** and pick a few
    pictures and videos. Add the demo again: it uses up to 2 videos and 3 pictures.
 4. **Change things.** Click any node in the graph. Its settings appear in the
@@ -309,5 +314,6 @@ option. This is the usual choice for Rust projects.
 
 ## Credits
 
-Designed and play-tested by HAVEKAUTION. The code is written with
+Designed and play-tested by HAVEKAUTION. Icons: [Phosphor](https://phosphoricons.com/)
+(MIT, see `crates/app/assets/fonts/LICENSE-Phosphor.txt`). The code is written with
 [Claude Code](https://claude.com/claude-code).

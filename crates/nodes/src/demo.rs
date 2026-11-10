@@ -110,12 +110,13 @@ pub struct DemoMedia {
 /// placement with the user's own media.
 ///
 /// ```text
-/// 1 Kaleido Bloom                                   Normal
-/// 2 Video 1 (beat-locked)                           Hard Light
+/// 1 Warehouse Tunnel                                  Normal
+/// 2 Video 1 (beat-locked)                           Screen
 /// 3 Video 2 (ping-pong)                             Screen, fades in and out (LFO)
 /// 4 Picture 1, mask: star pulsing on the beat       Normal
 /// 5 Picture 2 ─► Corner Pin (a tilted card)         Normal
-/// 6 Picture 3, mask: scrolling bands                Soft Light
+/// 6 Picture 3, mask: scrolling bands                Screen
+///   then Layers ─► Glow ─► Colour Grade ─► Program Out
 /// 7 Webcam ─► Chroma Key (off) ─► Motion Mask       Screen (muted to start)
 /// ```
 /// Without a camera the webcam part is left out (an empty camera name would
@@ -142,8 +143,29 @@ pub fn compositing(library: &SceneLibrary, media: &DemoMedia) -> Result<(Graph, 
     let (src_x, fx_x, mask_x, mix_x) = (0.0, 250.0, -260.0, 560.0);
 
     let mix = add(&mut g, registry::LAYER_MIXER, "Layers", [mix_x, ROW * 2.5])?;
-    let out = add(&mut g, PROGRAM_OUT, "", [mix_x + 250.0, ROW * 2.5])?;
-    cmds.push(wire(mix, out, "image"));
+    // One finish for the whole picture so the layers sit in one look.
+    let glow = add(
+        &mut g,
+        &shader("fx_glow.wgsl"),
+        "",
+        [mix_x + 250.0, ROW * 2.5],
+    )?;
+    let grade = add(
+        &mut g,
+        &shader("fx_colour.wgsl"),
+        "Final look",
+        [mix_x + 500.0, ROW * 2.5],
+    )?;
+    let out = add(&mut g, PROGRAM_OUT, "", [mix_x + 750.0, ROW * 2.5])?;
+    cmds.extend([
+        wire(mix, glow, "input"),
+        wire(glow, grade, "input"),
+        wire(grade, out, "image"),
+        set(glow, "amount", ParamValue::Float(0.6)),
+        set(glow, "threshold", ParamValue::Float(0.55)),
+        set(grade, "contrast", ParamValue::Float(1.12)),
+        set(grade, "saturation", ParamValue::Float(1.1)),
+    ]);
     let layer = |cmds: &mut Vec<Command>, from: NodeId, i: usize, mode: &str| {
         cmds.push(wire(from, mix, &registry::layer_port(i)));
         cmds.push(set(
@@ -155,16 +177,22 @@ pub fn compositing(library: &SceneLibrary, media: &DemoMedia) -> Result<(Graph, 
     let mut frames = Vec::new();
 
     // 1. The scene.
-    let scene = add(&mut g, &shader("kaleido_bloom.wgsl"), "", [src_x, 0.0])?;
+    let scene = add(&mut g, &shader("warehouse_tunnel.wgsl"), "", [src_x, 0.0])?;
+    cmds.push(set(scene, "colour_cycle", ParamValue::Float(0.3)));
     layer(&mut cmds, scene, 1, "Normal");
 
-    // 2. Video 1, beat-locked, in Hard Light.
+    // 2. Video 1, beat-locked, in Screen.
     let v1 = add(&mut g, registry::VIDEO, "Video 1", [src_x, ROW])?;
     cmds.push(set(v1, registry::FILE_PARAM, file(&media.videos, 0)));
     cmds.push(set(v1, "mode", ParamValue::Choice(3)));
-    layer(&mut cmds, v1, 2, "Hard Light");
+    layer(&mut cmds, v1, 2, "Screen");
+    cmds.push(set(
+        mix,
+        &registry::layer_param("opacity", 2),
+        ParamValue::Float(0.6),
+    ));
     frames.push((
-        "Video 1: Hard Light, beat-locked",
+        "Video 1: Screen, beat-locked",
         [src_x - 30.0, ROW - 34.0, 240.0, 250.0],
         [150, 110, 240],
     ));
@@ -250,7 +278,7 @@ pub fn compositing(library: &SceneLibrary, media: &DemoMedia) -> Result<(Graph, 
         [230, 190, 80],
     ));
 
-    // 6. Picture 3 through scrolling bands, in Soft Light.
+    // 6. Picture 3 through scrolling bands, in Screen.
     let p3 = add(&mut g, registry::IMAGE, "Picture 3", [src_x, ROW * 5.0])?;
     let bands = add(
         &mut g,
@@ -266,9 +294,14 @@ pub fn compositing(library: &SceneLibrary, media: &DemoMedia) -> Result<(Graph, 
         set(bands, "angle", ParamValue::Float(0.125)),
         set(bands, "scroll_speed", ParamValue::Float(0.3)),
     ]);
-    layer(&mut cmds, p3, 6, "Soft Light");
+    layer(&mut cmds, p3, 6, "Screen");
+    cmds.push(set(
+        mix,
+        &registry::layer_param("opacity", 6),
+        ParamValue::Float(0.6),
+    ));
     frames.push((
-        "Picture 3 through scrolling bands, Soft Light",
+        "Picture 3 through scrolling bands, Screen",
         [mask_x - 30.0, ROW * 5.0 - 34.0, 500.0, 250.0],
         [200, 110, 160],
     ));

@@ -81,6 +81,10 @@ pub const BUILTIN: &[Builtin] = &[
         source: include_str!("../shaders/fx_corner_pin.wgsl"),
     },
     Builtin {
+        file_name: "fx_switch.wgsl",
+        source: include_str!("../shaders/fx_switch.wgsl"),
+    },
+    Builtin {
         file_name: "mask_shape.wgsl",
         source: include_str!("../shaders/mask_shape.wgsl"),
     },

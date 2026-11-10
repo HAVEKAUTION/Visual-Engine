@@ -145,7 +145,11 @@ pub fn slot_ui(ui: &mut egui::Ui, slot: &mut ModSlot, id: usize) -> bool {
         })
         .response
         .on_hover_text("Where the movement comes from");
-        if ui.small_button("✕").on_hover_text("Remove").clicked() {
+        if ui
+            .small_button("\u{E4F6}")
+            .on_hover_text("Remove")
+            .clicked()
+        {
             remove = true;
         }
     });

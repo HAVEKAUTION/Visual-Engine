@@ -571,70 +571,73 @@ impl Themes {
 
     /// The toolbar's Theme menu.
     pub fn menu(&mut self, ui: &mut egui::Ui) {
-        let resp = ui.menu_button(RichText::new("Theme").strong(), |ui| {
-            ui.label(RichText::new("Built in").small().weak());
-            for t in built_in() {
-                let on = self.choice == Choice::BuiltIn(t.name.clone());
-                if ui.radio(on, t.name.as_str()).clicked() {
-                    self.choose(ui.ctx(), Choice::BuiltIn(t.name));
+        let resp = ui.menu_button(
+            RichText::new(format!("{} Theme", crate::icons::PALETTE)).strong(),
+            |ui| {
+                ui.label(RichText::new("Built in").small().weak());
+                for t in built_in() {
+                    let on = self.choice == Choice::BuiltIn(t.name.clone());
+                    if ui.radio(on, t.name.as_str()).clicked() {
+                        self.choose(ui.ctx(), Choice::BuiltIn(t.name));
+                    }
                 }
-            }
-            ui.separator();
-            ui.label(RichText::new("My themes").small().weak());
-            if self.user.is_empty() {
-                ui.label(
-                    RichText::new("None yet: use Edit colours… then Save.")
-                        .small()
-                        .weak(),
-                );
-            }
-            for (path, name) in self.user.clone() {
-                let on = self.choice == Choice::File(path.clone());
+                ui.separator();
+                ui.label(RichText::new("My themes").small().weak());
+                if self.user.is_empty() {
+                    ui.label(
+                        RichText::new("None yet: use Edit colours… then Save.")
+                            .small()
+                            .weak(),
+                    );
+                }
+                for (path, name) in self.user.clone() {
+                    let on = self.choice == Choice::File(path.clone());
+                    if ui
+                        .radio(on, name.as_str())
+                        .on_hover_text(path.display().to_string())
+                        .clicked()
+                    {
+                        self.choose(ui.ctx(), Choice::File(path));
+                    }
+                }
+                ui.separator();
                 if ui
-                    .radio(on, name.as_str())
-                    .on_hover_text(path.display().to_string())
+                    .button("\u{E6C8} Edit colours…")
+                    .on_hover_text("Change any colour, the text size and roundness, and save it")
                     .clicked()
                 {
-                    self.choose(ui.ctx(), Choice::File(path));
+                    self.open_editor();
+                    ui.close();
                 }
-            }
-            ui.separator();
-            if ui
-                .button("🎨 Edit colours…")
-                .on_hover_text("Change any colour, the text size and roundness, and save it")
-                .clicked()
-            {
-                self.open_editor();
-                ui.close();
-            }
-            if ui
-                .button("Import a theme file…")
-                .on_hover_text("Add a .ron theme someone shared with you")
-                .clicked()
-            {
-                self.import(ui.ctx());
-                ui.close();
-            }
-            if ui
-                .button("Open themes folder")
-                .on_hover_text(
-                    "Theme files are plain text. Open one in Notepad: the app updates \
+                if ui
+                    .button("Import a theme file…")
+                    .on_hover_text("Add a .ron theme someone shared with you")
+                    .clicked()
+                {
+                    self.import(ui.ctx());
+                    ui.close();
+                }
+                if ui
+                    .button("Open themes folder")
+                    .on_hover_text(
+                        "Theme files are plain text. Open one in Notepad: the app updates \
                      when you save it.",
-                )
-                .clicked()
-            {
-                self.open_folder();
-                ui.close();
-            }
-            if let Some((m, ok)) = &self.message {
-                ui.separator();
-                ui.label(
-                    RichText::new(m)
-                        .small()
-                        .color(if *ok { text_weak() } else { error() }),
-                );
-            }
-        });
+                    )
+                    .clicked()
+                {
+                    self.open_folder();
+                    ui.close();
+                }
+                if let Some((m, ok)) = &self.message {
+                    ui.separator();
+                    ui.label(RichText::new(m).small().color(if *ok {
+                        text_weak()
+                    } else {
+                        error()
+                    }));
+                }
+            },
+        );
         if resp.response.clicked() {
             self.rescan();
         }
@@ -765,7 +768,7 @@ impl Themes {
                 });
                 ui.horizontal(|ui| {
                     if ui
-                        .button(RichText::new("💾 Save").strong())
+                        .button(RichText::new("\u{E248} Save").strong())
                         .on_hover_text("Save as one of My themes (a .ron file you can share)")
                         .clicked()
                     {

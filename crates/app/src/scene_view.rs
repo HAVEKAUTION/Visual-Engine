@@ -638,7 +638,7 @@ impl SceneView {
                 .small()
                 .weak(),
             );
-            if ui.button("📁 Open scenes folder").clicked() {
+            if ui.button("\u{E24A} Open scenes folder").clicked() {
                 open_folder(&dir);
             }
         }
@@ -676,7 +676,7 @@ impl SceneView {
             .show_ui(ui, |ui| {
                 for (file, name, genres, broken) in &names {
                     let title = if *broken {
-                        format!("⚠ {name}")
+                        format!("\u{E4E0} {name}")
                     } else {
                         name.clone()
                     };
@@ -895,7 +895,7 @@ impl SceneView {
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .small_button("🗑")
+                        .small_button("\u{E4A6}")
                         .on_hover_text("Delete this preset")
                         .clicked()
                     {
@@ -934,7 +934,7 @@ impl SceneView {
             );
             let can = !self.preset_name.trim().is_empty();
             if ui
-                .add_enabled(can, egui::Button::new("💾 Save"))
+                .add_enabled(can, egui::Button::new("\u{E248} Save"))
                 .on_hover_text("Save the sliders, modulations and colours (same name = overwrite)")
                 .clicked()
                 && let Some(d) = self.live_deck()

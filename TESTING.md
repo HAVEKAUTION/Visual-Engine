@@ -327,6 +327,28 @@ Best done on a PC (or Windows user account) that has never built the app.
       Getting started steps in the Inspector.
 - [ ] Drag a song file onto `run.bat`: the app opens with that song loaded.
 
+## v2 M6 part 1 – Templates, Switch, icons
+
+Play music (Sources → Open song… or Computer audio) for all of these.
+- [ ] Buttons show clean line icons (folder, play, microphone, speaker, refresh,
+      undo / redo), and the toolbar has icons on Layout, Panels and Theme. No empty
+      boxes or colourful emoji anywhere.
+- [ ] Right-click the empty graph → **Templates (DJ sets)**: eight entries; hovering
+      one explains it.
+- [ ] **Peak time**: a different scene every 2 bars with a zoom-through.
+- [ ] **Warm-up**: slow dissolves every 4 bars.
+- [ ] Import 2 videos and 2 pictures, then **Your clips, cut to the beat**: cuts to the
+      next clip every bar; the colour split kicks with the kick drum.
+- [ ] **Photo pulse** and **Logo on the kick** use your first picture (a white logo
+      on black works best for the logo one).
+- [ ] **Glitch on the drop**: on a drop the picture tears for a couple of seconds.
+- [ ] Each template appears inside a frame titled "Template: …"; the message at the
+      bottom says what it does. Ctrl+Z removes it.
+- [ ] Click a template's **Switch** node: change Transition (Dissolve, Wipe, Slide,
+      Zoom through, Iris) and Transition time; the next change uses it.
+- [ ] **Add compositing demo** looks less muddy than before (tunnel underneath,
+      glowing finish).
+
 ## v2 M3b part 2 – Themes, tabs, bolder look
 
 - [ ] Toolbar → **Theme** → **Neon**: the whole app turns violet and cyan, including

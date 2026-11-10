@@ -250,7 +250,7 @@ fn capture(sh: &Shared, name: &str, want: Option<CameraMode>) -> Result<(), Stri
     }
     .ok_or_else(|| {
         if name.trim().is_empty() {
-            "No camera found. Plug one in, then press ⟳.".to_string()
+            "No camera found. Plug one in, then press \u{E036}.".to_string()
         } else {
             format!("Camera \"{name}\" isn't connected. Plug it in, or pick another camera.")
         }

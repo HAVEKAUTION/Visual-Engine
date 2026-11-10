@@ -140,7 +140,7 @@ impl MediaPool {
             if self.camera_search.is_some() {
                 ui.add(egui::Spinner::new().size(11.0));
             } else if ui
-                .small_button("⟳")
+                .small_button("\u{E036}")
                 .on_hover_text("Look for cameras again (after plugging one in)")
                 .clicked()
             {
@@ -153,7 +153,7 @@ impl MediaPool {
             }
             Some(Ok(list)) if list.is_empty() => {
                 ui.label(
-                    RichText::new("No camera found. Plug one in and press ⟳.")
+                    RichText::new("No camera found. Plug one in and press \u{E036}.")
                         .small()
                         .weak(),
                 );
@@ -162,7 +162,7 @@ impl MediaPool {
                 for cam in list.clone() {
                     let resp = ui
                         .add(
-                            egui::Label::new(format!("📷 {}", truncate(&cam.name, 30)))
+                            egui::Label::new(format!("\u{E10E} {}", truncate(&cam.name, 30)))
                                 .sense(Sense::click_and_drag()),
                         )
                         .on_hover_text("Drag into the graph, or double-click to add it.");
@@ -231,7 +231,7 @@ impl MediaPool {
         let mut action = None;
         ui.horizontal(|ui| {
             if ui
-                .button("➕ Import…")
+                .button("\u{E3D4} Import…")
                 .on_hover_text("Add pictures or videos. You can also drop files on the window.")
                 .clicked()
                 && let Some(files) = rfd::FileDialog::new()
@@ -334,7 +334,7 @@ impl MediaPool {
                     Sense::click_and_drag(),
                 )
                 .on_hover_text(match &failed {
-                    Some(e) => format!("{}\n⚠ {e}", path.display()),
+                    Some(e) => format!("{}\n\u{E4E0} {e}", path.display()),
                     None => format!(
                         "{}\nDrag into the graph, or double-click to add it.",
                         path.display()
@@ -384,7 +384,7 @@ fn carry_label(ui: &egui::Ui, name: &str) {
             .fixed_pos(p + vec2(12.0, 12.0))
             .show(ui.ctx(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(format!("➕ {name}"));
+                    ui.label(format!("\u{E3D4} {name}"));
                 });
             });
     }

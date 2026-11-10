@@ -61,7 +61,7 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
         }
         registry::LAYER_MIXER => {
             "Layer 1 is the bottom; each next layer sits on top with its own blend mode and \
-             opacity. S solos a layer, M mutes it, ▲ ▼ reorder. To add a layer, wire into the \
+             opacity. S solos a layer, M mutes it, \u{E13C} \u{E136} reorder. To add a layer, wire into the \
              free plug, or select a layer's node and press L."
         }
         registry::AUDIO_SIGNAL => {
@@ -94,6 +94,9 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
         }
         _ if shader == "fx_corner_pin.wgsl" => {
             "Drag the four corners in the viewer to pin the picture onto anything: a screen in a photo, a wall, a tilted card. The middle handle moves all four. Outside the corners is see-through, so put it on a layer (+ Layer on what's behind)."
+        }
+        _ if shader == "fx_switch.wgsl" => {
+            "Plug up to four pictures in (scenes, videos, photos). To change on the beat: add a              Beat Trigger (Every 8 beats) → Counter (Steps = pictures used) → drag the              Counter's value onto Show. Pick a Transition and how many beats it takes.              Right-click the graph → Templates has sets built this way."
         }
         _ if shader == "fx_merge.wgsl" => {
             "Background below, Foreground on top, blended with the mode. For more than two \
