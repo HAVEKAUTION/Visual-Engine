@@ -733,7 +733,10 @@ fn motion_mask_lights_up_where_the_picture_changes() {
     wire(&mut g, mix, motion, "input");
     wire(&mut g, motion, out, "image");
     s.settle(&g, out, &[black, white]);
-    s.frame(&g, out);
+    // The pictures appearing counts as movement; let it pass.
+    for _ in 0..12 {
+        s.frame(&g, out);
+    }
     let centre = |px: &[u8]| pixel(px, SIZE.0 / 2, SIZE.1 / 2);
     let px = s.frame(&g, out);
     assert!(centre(&px)[0] < 10, "still: {:?}", centre(&px));
@@ -746,6 +749,114 @@ fn motion_mask_lights_up_where_the_picture_changes() {
     );
     let px = s.frame(&g, out);
     assert!(centre(&px)[0] > 245, "moved: {:?}", centre(&px));
+    // A camera sends a new picture every 4th drawn frame: the change holds
+    // in between instead of flickering.
+    for _ in 0..3 {
+        let px = s.frame(&g, out);
+        assert!(centre(&px)[0] > 245, "held: {:?}", centre(&px));
+    }
+    // Still for longer than that: black again.
+    for _ in 0..10 {
+        s.frame(&g, out);
+    }
     let px = s.frame(&g, out);
     assert!(centre(&px)[0] < 10, "still again: {:?}", centre(&px));
+}
+
+#[test]
+fn corner_pin_places_the_picture_between_its_corners() {
+    let Some(mut s) = Session::new() else { return };
+    let mut g = Graph::new();
+    let out = add(&mut g, PROGRAM_OUT);
+    // Red on the left half, blue on the right.
+    let pic = picture_node(&mut g, "pin", |x, _| {
+        if x < 32 {
+            [255, 0, 0, 255]
+        } else {
+            [0, 0, 255, 255]
+        }
+    });
+    let pin = add(&mut g, &registry::shader_kind("fx_corner_pin.wgsl"));
+    wire(&mut g, pic, pin, "input");
+    wire(&mut g, pin, out, "image");
+    // A half-size picture in the middle.
+    let corners = |g: &mut Graph, l: f32, r: f32| {
+        for (name, v) in [
+            ("tl_x", l),
+            ("tl_y", 0.25),
+            ("tr_x", r),
+            ("tr_y", 0.25),
+            ("br_x", r),
+            ("br_y", 0.75),
+            ("bl_x", l),
+            ("bl_y", 0.75),
+        ] {
+            set(g, pin, name, graph::ParamValue::Float(v));
+        }
+    };
+    corners(&mut g, 0.25, 0.75);
+    s.settle(&g, out, &[pic]);
+    let at = |px: &[u8], u: f32| pixel(px, (SIZE.0 as f32 * u) as u32, SIZE.1 / 2);
+    let px = s.frame(&g, out);
+    assert!(
+        at(&px, 0.3)[0] > 240 && at(&px, 0.3)[2] < 15,
+        "{:?}",
+        at(&px, 0.3)
+    );
+    assert!(
+        at(&px, 0.7)[2] > 240 && at(&px, 0.7)[0] < 15,
+        "{:?}",
+        at(&px, 0.7)
+    );
+    assert!(
+        at(&px, 0.1)[..3].iter().all(|v| *v < 10),
+        "outside {:?}",
+        at(&px, 0.1)
+    );
+    // Swap left and right: the picture is mirrored.
+    corners(&mut g, 0.75, 0.25);
+    let px = s.frame(&g, out);
+    assert!(at(&px, 0.3)[2] > 240, "mirrored {:?}", at(&px, 0.3));
+    // A perspective quad (right edge taller) still covers its middle.
+    set(&mut g, pin, "tr_y", graph::ParamValue::Float(0.05));
+    set(&mut g, pin, "br_y", graph::ParamValue::Float(0.95));
+    let px = s.frame(&g, out);
+    assert!(
+        at(&px, 0.5)[..3].iter().any(|v| *v > 200),
+        "{:?}",
+        at(&px, 0.5)
+    );
+}
+
+#[test]
+fn compositing_demo_builds_and_draws() {
+    let lib = SceneLibrary::new(None);
+    // No media and no camera: the scene alone, other layers muted, no
+    // webcam nodes (they would open the first camera).
+    let (g, out) = nodes::demo::compositing(&lib, &nodes::demo::DemoMedia::default()).unwrap();
+    assert!(!g.nodes().iter().any(|n| n.kind == registry::CAMERA));
+    let mix = g
+        .nodes()
+        .iter()
+        .find(|n| n.kind == registry::LAYER_MIXER)
+        .unwrap();
+    for i in [2, 3] {
+        assert_eq!(
+            mix.param(&registry::layer_param("mute", i))
+                .map(|p| &p.value),
+            Some(&graph::ParamValue::Bool(true))
+        );
+    }
+    let Some((px, _, _)) = run(&g, out, 30) else {
+        return;
+    };
+    assert!(brightness(&px) > 5.0, "the scene shows");
+    // With a camera named, the webcam chain is there (not run here).
+    let media = nodes::demo::DemoMedia {
+        camera: Some("Test cam".into()),
+        ..Default::default()
+    };
+    let (g, _) = nodes::demo::compositing(&lib, &media).unwrap();
+    assert!(g.nodes().iter().any(|n| n.kind == registry::CAMERA));
+    assert_eq!(g.frames().len(), 3);
 }

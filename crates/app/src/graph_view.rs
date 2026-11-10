@@ -20,6 +20,7 @@ use scenes::uniforms::SIGNAL_NAMES;
 use signals::modulation::Source;
 
 use crate::graph_editor::{self, ACCENT, Editor, GROUP_COLOUR, port_colour};
+use crate::handles;
 use crate::media_pool::{MediaPool, PoolAction};
 use crate::mod_editor::{self, MOD_COLOR, SIGNAL_SOURCES};
 use crate::tips;
@@ -307,6 +308,41 @@ impl Workspace {
     }
 
     /// Caption for the viewer when it isn't showing the program.
+    /// Drag handles over the viewer for the selected Transform or Corner
+    /// Pin node.
+    pub fn viewer_handles(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
+        let Some(&id) = self.editor.selected.first() else {
+            return;
+        };
+        if self.editor.selected.len() != 1 {
+            return;
+        }
+        let Some(node) = self.graph.node(id).cloned() else {
+            return;
+        };
+        if !handles::has_handles(&node) || node.bypass {
+            return;
+        }
+        let hint = handles::show(ui, rect, &mut self.graph, &mut self.history, &node)
+            .unwrap_or("Drag the handles to place the picture");
+        let painter = ui.painter_at(rect);
+        let g = painter.layout_no_wrap(
+            format!("{} · {hint}", node.label),
+            egui::FontId::proportional(12.5),
+            Color32::WHITE,
+        );
+        let at = egui::pos2(rect.center().x - g.size().x * 0.5, rect.top() + 40.0);
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                at - egui::Vec2::splat(5.0),
+                g.size() + egui::Vec2::splat(10.0),
+            ),
+            4.0,
+            Color32::from_black_alpha(170),
+        );
+        painter.galley(at, g, Color32::WHITE);
+    }
+
     pub fn viewer_caption(&self) -> Option<String> {
         let label = |id: NodeId| {
             self.graph
@@ -362,6 +398,21 @@ impl Workspace {
             self.history.seal();
         }
         let viewed = self.selected_picture().or_else(|| self.viewed());
+        let first = |kind: media::Kind| {
+            self.pool
+                .items
+                .iter()
+                .find(|p| media::kind_of(p) == Some(kind))
+                .map(|p| p.display().to_string())
+        };
+        let demo_media = nodes::demo::DemoMedia {
+            video: first(media::Kind::Video),
+            photo: first(media::Kind::Image),
+            camera: match &self.pool.cameras {
+                Some(Ok(list)) => list.first().map(|c| c.name.clone()),
+                _ => None,
+            },
+        };
         self.editor.show(
             ui,
             graph_editor::Ctx {
@@ -373,6 +424,7 @@ impl Workspace {
                 viewed,
                 thumbs: &self.thumbs,
                 gpu: self.gpu.as_ref().map(|g| &g.0),
+                demo_media,
             },
         );
     }

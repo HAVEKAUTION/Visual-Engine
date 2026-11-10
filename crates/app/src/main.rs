@@ -5,6 +5,7 @@ mod av_sync;
 mod debug_panel;
 mod graph_editor;
 mod graph_view;
+mod handles;
 mod media_pool;
 mod mod_editor;
 mod offline;

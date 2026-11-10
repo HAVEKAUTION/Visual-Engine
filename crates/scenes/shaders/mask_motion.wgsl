@@ -15,12 +15,23 @@
   "passes": [ { "entry": "fs_store", "target": "A" }, { "entry": "fs_main" } ]
 }*/
 
-// Buffer A: r = this frame's brightness, g = last frame's.
+// Buffer A: r = this frame's brightness, g = what it was before it last
+// changed, b = seconds since it last changed. Cameras send fewer pictures
+// than we draw (15 a second vs 60), so a change is held for HOLD seconds
+// instead of lasting one drawn frame (which would flicker).
+const HOLD: f32 = 0.15;
+
 @fragment
 fn fs_store(in: VsOut) -> @location(0) vec4<f32> {
     let now = luma(img_input(in.uv).rgb);
-    let before = sample_a(in.uv).r;
-    return vec4f(now, before, 0.0, 1.0);
+    let a = sample_a(in.uv);
+    if abs(now - a.r) > 0.002 {
+        return vec4f(now, a.r, 0.0, 1.0);
+    }
+    let age = a.b + audio.delta;
+    // Held long enough: nothing is moving here any more.
+    let before = select(a.g, now, age > HOLD);
+    return vec4f(now, before, min(age, 1.0), 1.0);
 }
 
 @fragment

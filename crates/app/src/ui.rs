@@ -621,6 +621,7 @@ impl VisualEngineApp {
         self.sync.draw(&painter, rect);
         if self.scene.graph_mode && !self.fullscreen {
             self.viewer_overlays(ui, rect);
+            self.scene.ws.viewer_handles(ui, rect);
         }
 
         let snap = self.waveform.read();
@@ -714,7 +715,13 @@ impl VisualEngineApp {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
                 }
             }
-            ViewerMode::Program if ws.pip => {
+            // No preview while the viewer shows its handles: it's in the way.
+            ViewerMode::Program
+                if ws.pip
+                    && !ws.graph.node(sel).is_some_and(|n| {
+                        ws.editor.selected.len() == 1 && crate::handles::has_handles(n)
+                    }) =>
+            {
                 let w = (rect.width() * 0.26).clamp(120.0, 420.0);
                 let h = w * rect.height() / rect.width().max(1.0);
                 let r = Rect::from_min_size(

@@ -169,8 +169,8 @@ default **off**.
 
 **Current plan: v2 milestones M0–M10 in `DIRECTION_UPDATE_v2.md`** (plus the
 "v2.1 additions" section with the user's later wishes; research in `RESEARCH.md`),
-built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5 parts 1–2. Next up: **M5 part 3** (Transform / Corner Pin handles
-in the viewer, the compositing demo)
+built with the steps in `BUILD_STEPS_v2.md`. Done: M2, M3, M4, M5. Next up: **the M3b UI pass** (themes, docking, a clear
+Sources panel, bolder look), then M6
 (BUILD_STEPS_v2 Step 4). Then the M3b UI pass (themes, docking). No Twitch.
 
 Done so far (v1 numbering, kept for history):

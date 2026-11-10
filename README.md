@@ -33,6 +33,8 @@ not just alongside it.
   Hard Light, Colour, Luminosity…). A Layer Mixer with solo, mute and reorder. A mask
   plug on every node, with Shape and Gradient masks that pulse to the beat, Luma and
   Chroma (green screen) keys, a Motion Mask that follows movement, and a Key Mixer.
+  Move, scale, turn or corner-pin a picture by dragging handles in the viewer.
+  Right-click the graph → *Add compositing demo* to see it all at once.
 - **Media.** Pictures, video files (loop, ping-pong, beat-locked, scrub, stutter) and
   live webcams. Movement, brightness and colour seen in a video or camera become
   signals too.
@@ -149,25 +151,24 @@ Done:
 - the analysis engine;
 - the node graph and workspace;
 - media (pictures, video, cameras);
-- blend modes, the Layer Mixer, masks and keys.
+- compositing: blend modes, the Layer Mixer, masks and keys, Transform and Corner
+  Pin with handles in the viewer, and a demo project.
 
 Next, roughly in order:
 
-1. **Compositing, last part.** Transform and Corner Pin handles you drag in the
-   viewer, and a demo project.
-2. **UI pass.** Dockable panels you can drag, float and tab (like Adobe apps), saved
+1. **UI pass.** Dockable panels you can drag, float and tab (like Adobe apps), saved
    layouts, user themes, a clearer sources panel, and bolder Resolve-style looks.
-3. **Looks and the full node library.** Signature looks you can mutate and breed,
+2. **Looks and the full node library.** Signature looks you can mutate and breed,
    ready-made node layouts in the right-click menu, more original effects (datamosh,
    liquify, a symmetry engine), text, depth, and a free pack of starter pictures.
-4. **Perform mode.** Macros, MIDI learn and controller support, an automatic
+3. **Perform mode.** Macros, MIDI learn and controller support, an automatic
    "Director", a photosensitivity safety guard, and a panic key.
-5. **Outputs.** Second screen and projectors (with warping), Spout / Syphon / NDI for
+4. **Outputs.** Second screen and projectors (with warping), Spout / Syphon / NDI for
    OBS, and a live desktop wallpaper mode.
-6. **Video intelligence.** Motion tracking, and keying people out without a green screen.
-7. **Export.** 4K, vertical and square video and loops, with the song or the live
+5. **Video intelligence.** Motion tracking, and keying people out without a green screen.
+6. **Export.** 4K, vertical and square video and loops, with the song or the live
    audio, plus Ableton Link.
-8. **Tutorial** inside the app.
+7. **Tutorial** inside the app.
 
 Ideas for later: stems (separate drums / bass / vocals as their own signals) and
 sampling, lyric tracks, DMX lighting, OSC, a phone remote, and sharing Looks.

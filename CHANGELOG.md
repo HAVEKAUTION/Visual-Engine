@@ -2,6 +2,30 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M5 part 3: viewer handles, Corner Pin, demo (M5 done)
+- **Fix: Motion Mask on a camera.** "Mask this node → Motion Mask" on a camera (or any
+  source) left the Motion Mask with no picture to watch, so the whole camera went
+  dark. Keys and Motion Mask now go *after* a source and show its cut-out. They still
+  feed a mask plug as before when the node has a picture input.
+- **Fix: Motion Mask flicker with cameras.** A camera sends about 15 pictures a second
+  but we draw 60, so movement lit up only every 4th frame. Each change is now held
+  for 0.15 s.
+- **Viewer handles.** Select a **Transform** to get handles in the viewer: drag the
+  middle to move, a corner to scale and turn (Shift: scale only). One drag = one undo.
+- **Corner Pin** effect: pin a picture's four corners anywhere (true perspective),
+  see-through outside. Drag the corners, or the middle to move all four. It has Kick
+  punch.
+- **Compositing demo** (right-click the graph → *Add compositing demo*):
+  - a scene;
+  - your first video in Hard Light, beat-locked;
+  - your first picture inside a star that pulses on the beat;
+  - your webcam showing only what moves (Chroma Key ready, off).
+
+  Layers with no media are muted.
+- The corner preview hides while handles are shown.
+- Tests: handle maths against the shader, Corner Pin on the GPU (including a mirrored
+  pin and a perspective pin), the demo, and the camera hold.
+
 ## 2026-11-10 — v2 M5 part 2: masks, keys, everything findable
 - New **Masks & Keys** nodes (green in the menus):
   - **Shape Mask**: circle, rectangle, polygon, star or ring, with a soft edge. It can

@@ -667,6 +667,8 @@ pub struct Ctx<'a> {
     pub thumbs: &'a HashMap<NodeId, egui::TextureId>,
     /// GPU milliseconds per node (None: not measurable on this GPU).
     pub gpu: Option<&'a HashMap<NodeId, f32>>,
+    /// Pool media and camera the compositing demo uses.
+    pub demo_media: nodes::demo::DemoMedia,
 }
 
 impl Editor {
@@ -2629,7 +2631,7 @@ impl Editor {
 
     /// Wire a freshly added node according to how it was asked for.
     fn wire_new(&mut self, ui: &egui::Ui, c: &mut Ctx, new: NodeId, insert: Insert, screen: Pos2) {
-        let Some(node) = c.graph.node(new).cloned() else {
+        let Some(mut node) = c.graph.node(new).cloned() else {
             return;
         };
         let first_image = node
@@ -2637,6 +2639,32 @@ impl Editor {
             .iter()
             .find(|p| p.ty == PortType::Image)
             .map(|p| p.name.clone());
+        // A key or Motion Mask "masking" a source (camera, picture, scene)
+        // would have nothing to look at: the source would have to feed its
+        // own mask. It goes after the source instead, giving the cut-out.
+        let insert = match insert {
+            Insert::Mask(target)
+                if first_image.is_some()
+                    && c.graph
+                        .node(target)
+                        .is_some_and(|t| !t.inputs.iter().any(|p| p.ty == PortType::Image)) =>
+            {
+                if let Some(p) = node.param_mut("output")
+                    && let Some(i) = p.def.options.iter().position(|o| o.starts_with("Cut-out"))
+                {
+                    p.value = ParamValue::Choice(i as u32);
+                }
+                self.say(
+                    ui,
+                    format!(
+                        "{} added after it, showing only the cut-out part.",
+                        node.label
+                    ),
+                );
+                Insert::Serial(target)
+            }
+            other => other,
+        };
         let image_out = node
             .outputs
             .iter()
@@ -3201,6 +3229,38 @@ impl Editor {
                 self.selected.clear();
                 self.focus_group = None;
             }
+            MenuAction::CompositingDemo => {
+                match nodes::demo::compositing(c.library, &c.demo_media) {
+                    Ok((g, _)) => {
+                        let clip = Clip {
+                            nodes: g.nodes().to_vec(),
+                            links: g.links().to_vec(),
+                            frames: g.frames().to_vec(),
+                            groups: g.groups().to_vec(),
+                        };
+                        if let Ok(text) = ron::to_string(&clip) {
+                            self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
+                        }
+                        let m = &c.demo_media;
+                        let missing: Vec<&str> =
+                            [(m.video.is_none(), "video"), (m.photo.is_none(), "picture")]
+                                .iter()
+                                .filter(|(gone, _)| *gone)
+                                .map(|(_, what)| *what)
+                                .collect();
+                        if !missing.is_empty() {
+                            self.say(
+                                ui,
+                                format!(
+                                    "Demo added. Your Media panel has no {}, so that layer is                                      muted: choose a file on its node, then unmute the layer.",
+                                    missing.join(" or ")
+                                ),
+                            );
+                        }
+                    }
+                    Err(e) => self.say(ui, e),
+                }
+            }
             MenuAction::Starter => match nodes::demo::build(c.library) {
                 Ok((g, _)) => {
                     let clip = Clip {
@@ -3447,6 +3507,7 @@ enum MenuAction {
     Duplicate,
     Clear,
     Starter,
+    CompositingDemo,
     AddFrame,
     FrameColour(u32, [u8; 3]),
     RenameFrame(u32),
@@ -3502,6 +3563,15 @@ fn add_menu(
         .clicked()
     {
         pick = Some(MenuAction::Starter);
+    }
+    if ui
+        .button("Add compositing demo")
+        .on_hover_text(
+            "A scene, a video in Hard Light, a photo in a pulsing star and your webcam,              layered. Uses the first video, picture and camera in your Media panel.",
+        )
+        .clicked()
+    {
+        pick = Some(MenuAction::CompositingDemo);
     }
     if ui
         .button("Clear graph")

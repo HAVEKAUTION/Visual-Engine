@@ -89,6 +89,12 @@ pub fn for_node(kind: &str, category: Category) -> Option<&'static str> {
             "Plug two masks in (A and B) and combine them, e.g. a circle minus a smaller \
              circle = a ring, or a shape intersected with motion."
         }
+        _ if shader == "fx_transform.wgsl" => {
+            "Drag the handles in the viewer: the middle moves the picture, a corner scales              and turns it (hold Shift to only scale). Kick punch makes it jump on every kick;              Spin speed turns it with the music."
+        }
+        _ if shader == "fx_corner_pin.wgsl" => {
+            "Drag the four corners in the viewer to pin the picture onto anything: a screen              in a photo, a wall, a tilted card. The middle handle moves all four. Outside the              corners is see-through, so put it on a layer (+ Layer on what's behind)."
+        }
         _ if shader == "fx_merge.wgsl" => {
             "Background below, Foreground on top, blended with the mode. For more than two \
              pictures use a Layer Mixer (right-click → Add a layer on top)."

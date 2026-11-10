@@ -316,6 +316,33 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M5 part 3 – Viewer handles, Corner Pin, demo (GATE for M5)
+
+Run: `cargo run --release -p app` (close any running copy first)
+
+**Motion Mask on the camera (fixed)**
+- [ ] Right-click the camera node → Mask this node → **Motion Mask**. A message says it
+      was added after the camera. Wave: only your moving hand shows, with a short
+      trail. Sitting still: (nearly) black.
+
+**Handles**
+- [ ] Picture node → + Effect → **Transform**. With Transform selected, the viewer
+      shows an orange frame with dots. Drag the middle: the picture moves. Drag a
+      corner: it grows and turns. Hold Shift while dragging a corner: it only grows.
+- [ ] Ctrl+Z undoes a whole drag in one step. The sliders in the Inspector follow.
+- [ ] Picture node → + Effect → **Corner Pin**, then put it on a layer over a scene.
+      Drag each corner onto a different spot: the picture bends in perspective; the
+      scene shows around it. Drag the middle dot: all four move.
+
+**Demo (the M5 gate)**
+- [ ] Add a video and a picture to the Media panel (Import…). Open a song.
+- [ ] Right-click empty graph space → **Add compositing demo**. You should see:
+      the Kaleido scene, the video in Hard Light over it, your picture inside a star
+      that pulses on the beat, and your webcam showing only what moves.
+- [ ] Without a video or picture in the pool, those layers are muted and a message
+      says so.
+- [ ] The gate: does a song + a video + a photo layered and reacting look great?
+
 ## v2 M5 part 2 – Masks, keys, everything findable
 
 Run: `cargo run --release -p app` (close any running copy first)
