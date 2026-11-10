@@ -7,14 +7,17 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use egui::{Color32, RichText, Stroke, StrokeKind};
-use graph::{Command, Endpoint, Graph, History, Link, NodeId, OutputRef, ParamValue, Resolution};
+use graph::{
+    Command, Endpoint, Graph, Group, GroupId, History, Link, NodeId, OutputRef, ParamValue,
+    PublishedParam, Resolution,
+};
 use nodes::Evaluator;
 use nodes::registry::{self, AUDIO_SIGNAL, CatalogueEntry, PROGRAM_OUT};
 use scenes::SceneLibrary;
 use scenes::uniforms::SIGNAL_NAMES;
 use signals::modulation::Source;
 
-use crate::graph_editor::{self, ACCENT, Editor, port_colour};
+use crate::graph_editor::{self, ACCENT, Editor, GROUP_COLOUR, port_colour};
 use crate::mod_editor::{self, MOD_COLOR, SIGNAL_SOURCES};
 
 const AUTOSAVE_EVERY: Duration = Duration::from_secs(30);
@@ -88,6 +91,8 @@ pub struct Workspace {
     pub wipe: f32,
     /// Live picture of each node (egui textures), for thumbnails, PiP and wipe.
     pub thumbs: HashMap<NodeId, egui::TextureId>,
+    /// GPU milliseconds per node and in total (None: the GPU can't tell).
+    pub gpu: Option<(HashMap<NodeId, f32>, f32)>,
 }
 
 impl Workspace {
@@ -126,6 +131,7 @@ impl Workspace {
             pip: true,
             wipe: 0.5,
             thumbs: HashMap::new(),
+            gpu: None,
         }
     }
 
@@ -242,6 +248,7 @@ impl Workspace {
                 library,
                 viewed,
                 thumbs: &self.thumbs,
+                gpu: self.gpu.as_ref().map(|g| &g.0),
             },
         );
     }
@@ -261,6 +268,11 @@ impl Workspace {
             }
             ui.add_space(6.0);
         }
+        self.editor.check_focus(&self.graph);
+        if let Some(gid) = self.editor.focus_group {
+            self.group_inspector(ui, gid);
+            return;
+        }
         let id = match (self.editor.selected.len(), self.editor.selected.first()) {
             (1, Some(id)) => *id,
             (0, _) => {
@@ -276,7 +288,8 @@ impl Workspace {
                 empty_state(
                     ui,
                     &format!("{k} nodes selected."),
-                    "Ctrl+D bypasses them, Del removes them, Ctrl+C copies them.",
+                    "Ctrl+G groups them, Ctrl+D bypasses them, Del removes them, Ctrl+C \
+                     copies them.",
                 );
                 return;
             }
@@ -305,6 +318,36 @@ impl Workspace {
         });
         if let Some(e) = entry {
             ui.label(RichText::new(&e.description).small().weak());
+        }
+        let around = self.graph.groups_around(id);
+        if !around.is_empty() {
+            let mut pick = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("In group").small().weak());
+                for gid in around.iter().rev() {
+                    if let Some(g) = self.graph.group(*gid)
+                        && ui
+                            .small_button(RichText::new(&g.label).color(GROUP_COLOUR))
+                            .on_hover_text("Show the group and its macro knobs")
+                            .clicked()
+                    {
+                        pick = Some(*gid);
+                    }
+                }
+            });
+            if let Some(gid) = pick {
+                self.editor.select_group(&self.graph, gid);
+            }
+        }
+        if let Some(ms) = self.gpu.as_ref().and_then(|g| g.0.get(&id)) {
+            ui.label(
+                RichText::new(format!("GPU {ms:.2} ms per frame"))
+                    .small()
+                    .weak(),
+            )
+            .on_hover_text(
+                "At 60 fps the whole frame has 16.7 ms. Half or quarter size makes a node cheaper.",
+            );
         }
         if let Some(e) = self.eval.errors.get(&id) {
             ui.label(RichText::new(format!("⚠ {e}")).small().color(ERROR_COLOR));
@@ -371,6 +414,249 @@ impl Workspace {
         }
     }
 
+    /// A setting's label, marked ◆ when it's a macro knob of a group.
+    fn published_label(&self, node: NodeId, param: &str, label: &str) -> RichText {
+        let published = self.graph.groups().iter().any(|g| {
+            g.published
+                .iter()
+                .any(|pp| pp.node == node && pp.param == param)
+        });
+        if published {
+            RichText::new(format!("◆ {label}")).color(GROUP_COLOUR)
+        } else {
+            RichText::new(label)
+        }
+    }
+
+    /// Right-click a setting's label: publish it as a macro knob on any
+    /// group around the node (or take it off again).
+    fn publish_menu(&mut self, resp: &egui::Response, node: NodeId, param: &str, label: &str) {
+        let around = self.graph.groups_around(node);
+        if around.is_empty() {
+            return;
+        }
+        let resp = resp
+            .clone()
+            .on_hover_text("Right-click to publish this setting as a macro knob on its group.");
+        let mut pick: Option<(GroupId, Option<usize>)> = None;
+        resp.context_menu(|ui| {
+            for gid in &around {
+                let Some(g) = self.graph.group(*gid) else {
+                    continue;
+                };
+                match g
+                    .published
+                    .iter()
+                    .position(|pp| pp.node == node && pp.param == param)
+                {
+                    Some(i) => {
+                        if ui
+                            .button(format!("Remove from \"{}\" knobs", g.label))
+                            .clicked()
+                        {
+                            pick = Some((*gid, Some(i)));
+                        }
+                    }
+                    None => {
+                        if ui
+                            .button(format!("Publish to group \"{}\"", g.label))
+                            .on_hover_text(
+                                "Shows as a knob on the group's box and in its Inspector",
+                            )
+                            .clicked()
+                        {
+                            pick = Some((*gid, None));
+                        }
+                    }
+                }
+            }
+        });
+        let Some((gid, remove)) = pick else { return };
+        let Some(g) = self.graph.group(gid) else {
+            return;
+        };
+        let mut g = g.clone();
+        match remove {
+            Some(i) => {
+                g.published.remove(i);
+            }
+            None => {
+                let mut name = label.to_string();
+                if g.published.iter().any(|pp| pp.label == name) {
+                    let node_label = self
+                        .graph
+                        .node(node)
+                        .map(|n| n.label.clone())
+                        .unwrap_or_default();
+                    name = format!("{node_label} {label}");
+                }
+                g.published.push(PublishedParam {
+                    label: name,
+                    node,
+                    param: param.to_string(),
+                });
+            }
+        }
+        let _ = self.history.exec(&mut self.graph, Command::PutGroup(g));
+    }
+
+    /// The Inspector for a whole group: name, fold, macro knobs, contents.
+    fn group_inspector(&mut self, ui: &mut egui::Ui, gid: GroupId) {
+        let Some(g) = self.graph.group(gid).cloned() else {
+            return;
+        };
+        let members = self.graph.group_members(gid);
+        let put = |ws: &mut Self, g: Group, key: Option<&str>| {
+            let _ = ws
+                .history
+                .exec_merge(&mut ws.graph, Command::PutGroup(g), key);
+        };
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("GROUP").small().color(GROUP_COLOUR));
+            let mut label = g.label.clone();
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut label)
+                    .font(egui::TextStyle::Heading)
+                    .desired_width(ui.available_width()),
+            );
+            if r.changed() {
+                put(
+                    self,
+                    Group { label, ..g.clone() },
+                    Some(&format!("glabel{}", gid.0)),
+                );
+            }
+        });
+        let ms: f32 = self
+            .gpu
+            .as_ref()
+            .map(|gpu| members.iter().filter_map(|m| gpu.0.get(m)).sum())
+            .unwrap_or(0.0);
+        let mut info = format!("{} nodes", members.len());
+        if let Some(p) = g.parent.and_then(|p| self.graph.group(p)) {
+            info += &format!(" · inside \"{}\"", p.label);
+        }
+        if ms > 0.0 {
+            info += &format!(" · GPU {ms:.2} ms");
+        }
+        ui.label(RichText::new(info).small().weak());
+        ui.horizontal(|ui| {
+            let fold = if g.collapsed {
+                "▾ Open"
+            } else {
+                "▸ Fold into a box"
+            };
+            if ui.button(fold).clicked() {
+                put(
+                    self,
+                    Group {
+                        collapsed: !g.collapsed,
+                        ..g.clone()
+                    },
+                    None,
+                );
+            }
+            if ui
+                .button("Ungroup")
+                .on_hover_text("Ctrl+Shift+G. Keeps the nodes.")
+                .clicked()
+            {
+                let _ = self
+                    .history
+                    .exec(&mut self.graph, Command::RemoveGroup(gid));
+                self.editor.focus_group = None;
+            }
+        });
+        ui.separator();
+        ui.label(RichText::new("Macro knobs").strong());
+        if g.published.is_empty() {
+            ui.label(
+                RichText::new(
+                    "None yet. Select a node inside, right-click any setting's name → \
+                     Publish to group. Its knob then shows here and on the folded box, so \
+                     you can play the whole group from a few controls.",
+                )
+                .small()
+                .weak(),
+            );
+        }
+        let mut change: Option<Group> = None;
+        for (i, pp) in g.published.iter().enumerate() {
+            let Some(param) = self
+                .graph
+                .node(pp.node)
+                .and_then(|n| n.param(&pp.param))
+                .cloned()
+            else {
+                continue;
+            };
+            ui.push_id(("macro", gid.0, i), |ui| {
+                ui.horizontal(|ui| {
+                    let mut label = pp.label.clone();
+                    if ui
+                        .add(egui::TextEdit::singleline(&mut label).desired_width(120.0))
+                        .on_hover_text(format!(
+                            "Drives node {} · {}. Type to rename the knob.",
+                            pp.node,
+                            param.def.label()
+                        ))
+                        .changed()
+                    {
+                        let mut ng = g.clone();
+                        ng.published[i].label = label;
+                        change = Some(ng);
+                    }
+                    if ui
+                        .add_enabled(i > 0, egui::Button::new("↑").small())
+                        .clicked()
+                    {
+                        let mut ng = g.clone();
+                        ng.published.swap(i, i - 1);
+                        change = Some(ng);
+                    }
+                    if ui
+                        .add_enabled(i + 1 < g.published.len(), egui::Button::new("↓").small())
+                        .clicked()
+                    {
+                        let mut ng = g.clone();
+                        ng.published.swap(i, i + 1);
+                        change = Some(ng);
+                    }
+                    if ui
+                        .small_button("✕")
+                        .on_hover_text("Remove this knob (the setting stays)")
+                        .clicked()
+                    {
+                        let mut ng = g.clone();
+                        ng.published.remove(i);
+                        change = Some(ng);
+                    }
+                });
+                self.param_ui(ui, pp.node, &param);
+            });
+            ui.add_space(4.0);
+        }
+        if let Some(ng) = change {
+            put(self, ng, Some(&format!("gknobs{}", gid.0)));
+        }
+        ui.separator();
+        ui.label(RichText::new("Inside").strong());
+        let mut pick = None;
+        for m in &members {
+            if let Some(n) = self.graph.node(*m)
+                && ui
+                    .selectable_label(false, format!("{:02}  {}", m.0, n.label))
+                    .clicked()
+            {
+                pick = Some(*m);
+            }
+        }
+        if let Some(m) = pick {
+            self.editor.selected = std::collections::BTreeSet::from([m]);
+            self.editor.focus_group = None;
+        }
+    }
+
     fn param_ui(&mut self, ui: &mut egui::Ui, id: NodeId, p: &graph::Param) {
         let name = p.def.name.clone();
         let key = format!("p{}:{name}", id.0);
@@ -422,9 +708,12 @@ impl Workspace {
             }
             ParamValue::Bool(b) => {
                 let mut b = *b;
-                if ui.checkbox(&mut b, p.def.label()).changed() {
+                let label = self.published_label(id, &p.def.name, p.def.label());
+                let r = ui.checkbox(&mut b, label);
+                if r.changed() {
                     set(self, ParamValue::Bool(b));
                 }
+                self.publish_menu(&r, id, &p.def.name, p.def.label());
             }
             ParamValue::Choice(i) => {
                 let friendly = |o: &str| {
@@ -440,8 +729,9 @@ impl Workspace {
                     .get(*i as usize)
                     .map(|o| friendly(o))
                     .unwrap_or_default();
-                ui.horizontal(|ui| {
-                    ui.label(p.def.label());
+                let label = self.published_label(id, &p.def.name, p.def.label());
+                let label_resp = ui.horizontal(|ui| {
+                    let r = ui.label(label);
                     egui::ComboBox::from_id_salt(("choice", id.0, &p.def.name))
                         .selected_text(current)
                         .height(360.0)
@@ -452,7 +742,9 @@ impl Workspace {
                                 }
                             }
                         });
+                    r
                 });
+                self.publish_menu(&label_resp.inner, id, &p.def.name, p.def.label());
             }
             ParamValue::Colour(c) => {
                 let mut c = *c;
@@ -484,12 +776,15 @@ impl Workspace {
         let modulated = !wires.is_empty() || p.mods.iter().any(|m| m.enabled);
         let open_id = ui.scope_id().with(("mods-open", id.0, name));
         let mut open = ui.data(|d| d.get_temp::<bool>(open_id).unwrap_or(false));
-        ui.horizontal(|ui| {
-            ui.label(p.def.label());
+        let label = self.published_label(id, name, p.def.label());
+        let label_resp = ui.horizontal(|ui| {
+            let r = ui.label(label);
             if modulated && let Some(v) = live {
                 ui.label(RichText::new(format!("→ {v:.2}")).small().color(MOD_COLOR));
             }
+            r
         });
+        self.publish_menu(&label_resp.inner, id, name, p.def.label());
         ui.horizontal(|ui| {
             let mut v = base;
             ui.spacing_mut().slider_width = (ui.available_width() - 110.0).max(60.0);

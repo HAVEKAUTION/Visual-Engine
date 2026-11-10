@@ -230,14 +230,30 @@ impl Graph {
                     .position(|g| g.id == id)
                     .ok_or(GraphError::NoSuchGroup(id.0))?;
                 let old = self.groups_mut().remove(i);
-                // Undo: put the group back without its published controls,
-                // move its sub-groups back in, then restore it fully (the
-                // controls may point into those sub-groups).
+                // Its nodes move up into its parent group (if any).
+                let mut undo = Vec::new();
+                let mut parent_was = None;
+                if let Some(pid) = old.parent
+                    && let Some(p) = self.groups_mut().iter_mut().find(|g| g.id == pid)
+                {
+                    // Its published controls may point at those nodes: put
+                    // them back last.
+                    undo.push(Command::PutGroup(Group {
+                        published: Vec::new(),
+                        ..p.clone()
+                    }));
+                    parent_was = Some(p.clone());
+                    p.nodes.extend(old.nodes.iter().copied());
+                }
+                // Undo: take the nodes back out of the parent, put the group
+                // back without its published controls, move its sub-groups
+                // back in, then restore it fully (the controls may point into
+                // those sub-groups).
                 let bare = Group {
                     published: Vec::new(),
                     ..old.clone()
                 };
-                let mut undo = vec![Command::PutGroup(bare)];
+                undo.push(Command::PutGroup(bare));
                 for g in self.groups_mut() {
                     if g.parent == Some(id) {
                         undo.push(Command::PutGroup(g.clone()));
@@ -245,6 +261,7 @@ impl Graph {
                     }
                 }
                 undo.push(Command::PutGroup(old));
+                undo.extend(parent_was.map(Command::PutGroup));
                 Command::Batch(undo)
             }
             Command::Batch(cmds) => {

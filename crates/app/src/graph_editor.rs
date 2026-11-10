@@ -2,7 +2,8 @@
 //! nodes, colour-coded plugs and wires, live thumbnails, Frames (coloured
 //! backdrops that keep areas tidy), snap-to-grid, a right-click add menu,
 //! Shift+Space search, S/P/L quick insert, selection, copy/paste, delete,
-//! bypass and undo/redo.
+//! bypass, undo/redo, and Groups (Ctrl+G): a set of nodes that can fold
+//! into one box with its own macro knobs (published settings).
 //!
 //! Mouse: drag from a plug to wire it; drag a wire off an input to unplug it;
 //! drop a wire on empty space to add a node already wired to it; drop a blue
@@ -17,7 +18,8 @@ use egui::{
     Sense, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::{
-    Command, Endpoint, Frame, Graph, History, Link, Node, NodeId, OutputRef, ParamValue, PortType,
+    Command, Endpoint, Frame, Graph, Group, GroupId, History, Link, Node, NodeId, OutputRef,
+    ParamValue, PortType,
 };
 use nodes::Evaluator;
 use nodes::registry::{self, CatalogueEntry, Category};
@@ -44,6 +46,11 @@ const THUMB_H: f32 = (NODE_W - 12.0) * 9.0 / 16.0;
 /// Snap grid (graph units).
 pub const GRID: f32 = 16.0;
 const FRAME_TITLE_H: f32 = 24.0;
+/// Group backdrops: title strip height and padding around their nodes.
+const GROUP_TITLE_H: f32 = 22.0;
+const GROUP_PAD: f32 = 12.0;
+/// Groups get one quiet colour so they read differently from Frames.
+pub const GROUP_COLOUR: Color32 = Color32::from_rgb(196, 180, 255);
 
 /// Colour tags offered for nodes and frames.
 pub const TAG_COLOURS: [[u8; 3]; 8] = [
@@ -109,6 +116,12 @@ enum Hit {
     ModRow(NodeId, String),
     FrameTitle(u32),
     FrameResize(u32),
+    /// A collapsed group's box, or an open group's title strip.
+    Group(GroupId),
+    /// The ▸ / ▾ button that folds a group.
+    GroupToggle(GroupId),
+    /// A macro knob row on a collapsed group (index into `published`).
+    Macro(GroupId, usize),
 }
 
 /// Where a node's parts sit, in graph units.
@@ -167,6 +180,136 @@ fn layout(g: &Graph, n: &Node, thumbs: bool) -> Layout {
     }
 }
 
+/// A collapsed group drawn as one box. Its plugs are the wires that cross
+/// its edge; they stand for the real plugs inside.
+struct GroupBox {
+    id: GroupId,
+    label: String,
+    rect: Rect,
+    members: Vec<NodeId>,
+    inputs: Vec<(Endpoint, String, PortType, Pos2)>,
+    outputs: Vec<(OutputRef, String, PortType, Pos2)>,
+    /// Macro knob rows: (index into `published`, label, bar rect).
+    macros: Vec<(usize, String, Rect)>,
+    /// Picture shown inside: the node feeding its first picture output.
+    thumb: Option<(NodeId, Rect)>,
+}
+
+fn group_box(g: &Graph, grp: &Group, members: Vec<NodeId>, thumbs: bool) -> Option<GroupBox> {
+    let min = members
+        .iter()
+        .filter_map(|id| g.node(*id))
+        .map(|n| pos2(n.pos[0], n.pos[1]))
+        .reduce(|a, b| pos2(a.x.min(b.x), a.y.min(b.y)))?;
+    let inside = |n: NodeId| members.contains(&n);
+    let row_y = |i: usize| min.y + HEADER_H + ROW_H * (i as f32 + 0.5) + 2.0;
+    let mut ins: Vec<(Endpoint, String, PortType)> = Vec::new();
+    let mut outs: Vec<(OutputRef, String, PortType)> = Vec::new();
+    for l in g.links() {
+        let ty = g
+            .node(l.from.node)
+            .and_then(|n| n.output(&l.from.port))
+            .map(|p| p.ty)
+            .unwrap_or(PortType::Image);
+        let (a, b) = (inside(l.from.node), inside(l.to.node()));
+        if b && !a && !ins.iter().any(|x| x.0 == l.to) {
+            let node = g.node(l.to.node());
+            let label = match &l.to {
+                Endpoint::Input { node: n, port } => {
+                    let port = node
+                        .and_then(|nd| nd.input(port))
+                        .map(|p| p.label().to_string())
+                        .unwrap_or_else(|| port.clone());
+                    format!("{n} {port}")
+                }
+                Endpoint::Param { node: n, param } => {
+                    let param = node
+                        .and_then(|nd| nd.param(param))
+                        .map(|p| p.def.label().to_string())
+                        .unwrap_or_else(|| param.clone());
+                    format!("~ {n} {param}")
+                }
+            };
+            ins.push((l.to.clone(), label, ty));
+        }
+        if a && !b && !outs.iter().any(|x| x.0 == l.from) {
+            let label = g
+                .node(l.from.node)
+                .map(|n| truncate(&n.label, 14))
+                .unwrap_or_default();
+            outs.push((l.from.clone(), label, ty));
+        }
+    }
+    let inputs: Vec<_> = ins
+        .into_iter()
+        .enumerate()
+        .map(|(i, (e, l, t))| (e, l, t, pos2(min.x, row_y(i))))
+        .collect();
+    let outputs: Vec<_> = outs
+        .into_iter()
+        .enumerate()
+        .map(|(i, (o, l, t))| (o, l, t, pos2(min.x + NODE_W, row_y(i))))
+        .collect();
+    let first = inputs.len().max(outputs.len());
+    let macro_h = ROW_H + 6.0;
+    let top = min.y + HEADER_H + ROW_H * first as f32 + 6.0;
+    let macros: Vec<_> = grp
+        .published
+        .iter()
+        .enumerate()
+        .map(|(i, pp)| {
+            let y = top + macro_h * i as f32;
+            (
+                i,
+                pp.label.clone(),
+                Rect::from_min_max(
+                    pos2(min.x + 10.0, y + ROW_H - 2.0),
+                    pos2(min.x + NODE_W - 10.0, y + ROW_H + 2.0),
+                ),
+            )
+        })
+        .collect();
+    let body = top - min.y + macro_h * macros.len() as f32 + 6.0;
+    let thumb_node = outputs
+        .iter()
+        .find(|o| o.2 == PortType::Image)
+        .map(|o| o.0.node);
+    let thumb = thumb_node.filter(|_| thumbs).map(|n| {
+        (
+            n,
+            Rect::from_min_size(min + vec2(6.0, body), vec2(NODE_W - 12.0, THUMB_H)),
+        )
+    });
+    let h = body + thumb.map_or(0.0, |t| t.1.height() + 6.0);
+    Some(GroupBox {
+        id: grp.id,
+        label: grp.label.clone(),
+        rect: Rect::from_min_size(min, vec2(NODE_W, h.max(HEADER_H + ROW_H + 8.0))),
+        members,
+        inputs,
+        outputs,
+        macros,
+        thumb,
+    })
+}
+
+/// An open group: a backdrop around its nodes with a title strip.
+struct Backdrop {
+    id: GroupId,
+    label: String,
+    rect: Rect,
+    depth: usize,
+    members: Vec<NodeId>,
+}
+
+fn title_rect(r: Rect) -> Rect {
+    Rect::from_min_size(r.min, vec2(r.width(), GROUP_TITLE_H))
+}
+
+fn toggle_rect(r: Rect, h: f32) -> Rect {
+    Rect::from_min_size(r.min, vec2(h, h))
+}
+
 fn frame_rect(f: &Frame) -> Rect {
     Rect::from_min_size(pos2(f.rect[0], f.rect[1]), vec2(f.rect[2], f.rect[3]))
 }
@@ -201,7 +344,30 @@ enum Drag {
     Box {
         start: Pos2,
     },
+    /// Turning a macro knob on a collapsed group.
+    Macro {
+        node: NodeId,
+        param: String,
+        start: f32,
+        offset: f32,
+        width: f32,
+    },
     Pan,
+}
+
+/// What a dropped Signal wire is offered to drive.
+#[derive(Clone, Debug, PartialEq)]
+enum PickOn {
+    Node(NodeId),
+    /// A collapsed group: its macro knobs.
+    Group(GroupId),
+}
+
+/// What a rename box renames.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Rename {
+    Frame(u32),
+    Group(GroupId),
 }
 
 /// What a newly added node should be wired into.
@@ -237,6 +403,8 @@ struct Clip {
     links: Vec<Link>,
     #[serde(default)]
     frames: Vec<Frame>,
+    #[serde(default)]
+    groups: Vec<Group>,
 }
 
 const CLIP_TAG: &str = "visual-engine-nodes ";
@@ -251,9 +419,12 @@ pub struct Editor {
     menu_at: Pos2,
     search: Option<Search>,
     /// A Signal wire was dropped on a node: pick which slider it drives.
-    param_pick: Option<(OutputRef, NodeId, Pos2)>,
-    /// Renaming a frame: (id, text, screen position).
-    frame_rename: Option<(u32, String, Pos2)>,
+    param_pick: Option<(OutputRef, PickOn, Pos2)>,
+    /// Renaming a frame or group: (what, text, screen position).
+    rename: Option<(Rename, String, Pos2)>,
+    /// The group picked as a whole (its box or title was clicked). Shown in
+    /// the Inspector; cleared as soon as the selection changes.
+    pub focus_group: Option<GroupId>,
     framed: bool,
     /// When each trigger node last fired (for the flash).
     fired: HashMap<NodeId, f64>,
@@ -262,6 +433,8 @@ pub struct Editor {
     pub snap: bool,
     pub thumbnails: bool,
     pub show_help: bool,
+    /// Show each node's GPU time.
+    pub show_cost: bool,
 }
 
 impl Default for Editor {
@@ -275,13 +448,15 @@ impl Default for Editor {
             menu_at: Pos2::ZERO,
             search: None,
             param_pick: None,
-            frame_rename: None,
+            rename: None,
+            focus_group: None,
             framed: false,
             fired: HashMap::new(),
             message: None,
             snap: true,
             thumbnails: true,
             show_help: false,
+            show_cost: true,
         }
     }
 }
@@ -297,6 +472,8 @@ pub struct Ctx<'a> {
     pub viewed: Option<NodeId>,
     /// Live picture of each node, for thumbnails.
     pub thumbs: &'a HashMap<NodeId, egui::TextureId>,
+    /// GPU milliseconds per node (None: not measurable on this GPU).
+    pub gpu: Option<&'a HashMap<NodeId, f32>>,
 }
 
 impl Editor {
@@ -337,6 +514,37 @@ impl Editor {
 
     fn say(&mut self, ui: &egui::Ui, msg: impl Into<String>) {
         self.message = Some((msg.into(), ui.input(|i| i.time)));
+    }
+
+    /// Select a whole group (its box or title was clicked).
+    pub fn select_group(&mut self, g: &Graph, id: GroupId) {
+        self.selected = g.group_members(id).into_iter().collect();
+        self.focus_group = Some(id);
+    }
+
+    /// Forget the picked group once the selection no longer matches it.
+    pub fn check_focus(&mut self, g: &Graph) {
+        if let Some(id) = self.focus_group {
+            let members = g.group_members(id);
+            if members.is_empty()
+                || members.iter().copied().collect::<BTreeSet<_>>() != self.selected
+            {
+                self.focus_group = None;
+            }
+        }
+    }
+
+    /// The group Ctrl+Shift+G would undo: the picked one, else the innermost
+    /// group of the selected nodes.
+    fn group_to_ungroup(&self, g: &Graph) -> Option<GroupId> {
+        self.focus_group.or_else(|| {
+            let first = *self.selected.first()?;
+            let gid = g.group_of(first)?.id;
+            self.selected
+                .iter()
+                .all(|n| g.groups_around(*n).contains(&gid))
+                .then_some(gid)
+        })
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, mut c: Ctx) {
@@ -383,16 +591,114 @@ impl Editor {
         }
         self.fired.retain(|id, _| c.graph.node(*id).is_some());
 
+        self.check_focus(c.graph);
+        // Collapsed groups (not inside another collapsed one) become boxes;
+        // their nodes are hidden.
+        let mut hidden: HashMap<NodeId, GroupId> = HashMap::new();
+        let mut boxes: Vec<GroupBox> = Vec::new();
+        let collapsed_above = |g: &Graph, id: GroupId| {
+            g.group_ancestors(id)
+                .iter()
+                .any(|a| g.group(*a).is_some_and(|x| x.collapsed))
+        };
+        for grp in c.graph.groups() {
+            if !grp.collapsed || collapsed_above(c.graph, grp.id) {
+                continue;
+            }
+            let members = c.graph.group_members(grp.id);
+            for m in &members {
+                hidden.insert(*m, grp.id);
+            }
+            if let Some(b) = group_box(c.graph, grp, members, thumbs_on) {
+                boxes.push(b);
+            }
+        }
         let layouts: Vec<(NodeId, Layout)> = c
             .graph
             .nodes()
             .iter()
+            .filter(|n| !hidden.contains_key(&n.id))
             .map(|n| (n.id, layout(c.graph, n, thumbs_on)))
             .collect();
+        // Open groups: backdrops, deepest first so parents wrap children.
+        let mut open: Vec<&Group> = c
+            .graph
+            .groups()
+            .iter()
+            .filter(|g| !g.collapsed && !collapsed_above(c.graph, g.id))
+            .collect();
+        open.sort_by_key(|g| std::cmp::Reverse(c.graph.group_depth(g.id)));
+        let mut backdrops: Vec<Backdrop> = Vec::new();
+        for grp in open {
+            let mut r: Option<Rect> = None;
+            let mut add = |x: Rect| r = Some(r.map_or(x, |r| r.union(x)));
+            for (id, l) in &layouts {
+                if grp.nodes.contains(id) {
+                    add(l.rect);
+                }
+            }
+            for b in &boxes {
+                if c.graph
+                    .group(b.id)
+                    .is_some_and(|x| x.parent == Some(grp.id))
+                {
+                    add(b.rect);
+                }
+            }
+            for d in &backdrops {
+                if c.graph
+                    .group(d.id)
+                    .is_some_and(|x| x.parent == Some(grp.id))
+                {
+                    add(d.rect);
+                }
+            }
+            if let Some(r) = r {
+                backdrops.push(Backdrop {
+                    id: grp.id,
+                    label: grp.label.clone(),
+                    rect: Rect::from_min_max(
+                        r.min - vec2(GROUP_PAD, GROUP_PAD + GROUP_TITLE_H),
+                        r.max + vec2(GROUP_PAD, GROUP_PAD),
+                    ),
+                    depth: c.graph.group_depth(grp.id),
+                    members: c.graph.group_members(grp.id),
+                });
+            }
+        }
         let frames: Vec<Frame> = c.graph.frames().to_vec();
         let hit = |s: &Self, p: Pos2| -> Hit {
             let gp = to_graph(s, p);
             let r = (PORT_R * 1.8).max(8.0 / s.zoom);
+            for b in boxes.iter().rev() {
+                for (e, _, _, at) in &b.inputs {
+                    if at.distance(gp) < r {
+                        return match e {
+                            Endpoint::Input { node, port } => Hit::Input(*node, port.clone()),
+                            Endpoint::Param { node, param } => Hit::ModRow(*node, param.clone()),
+                        };
+                    }
+                }
+                for (o, _, _, at) in &b.outputs {
+                    if at.distance(gp) < r {
+                        return Hit::Output(o.node, o.port.clone());
+                    }
+                }
+            }
+            for b in boxes.iter().rev() {
+                if !b.rect.contains(gp) {
+                    continue;
+                }
+                if toggle_rect(b.rect, HEADER_H).contains(gp) {
+                    return Hit::GroupToggle(b.id);
+                }
+                for (i, _, bar) in &b.macros {
+                    if bar.expand2(vec2(2.0, 9.0)).contains(gp) {
+                        return Hit::Macro(b.id, *i);
+                    }
+                }
+                return Hit::Group(b.id);
+            }
             for (id, l) in layouts.iter().rev() {
                 for (name, _, _, at) in &l.inputs {
                     if at.distance(gp) < r {
@@ -413,6 +719,15 @@ impl Editor {
             for (id, l) in layouts.iter().rev() {
                 if l.rect.contains(gp) {
                     return Hit::Node(*id);
+                }
+            }
+            for d in backdrops.iter() {
+                // Deepest first (that's their order).
+                if toggle_rect(d.rect, GROUP_TITLE_H).contains(gp) {
+                    return Hit::GroupToggle(d.id);
+                }
+                if title_rect(d.rect).contains(gp) {
+                    return Hit::Group(d.id);
                 }
             }
             for f in frames.iter().rev() {
@@ -518,6 +833,48 @@ impl Editor {
                         };
                     }
                 }
+                Hit::Group(id) => {
+                    if !add_select {
+                        self.select_group(c.graph, id);
+                    } else {
+                        self.selected.extend(c.graph.group_members(id));
+                    }
+                    let start = self
+                        .selected
+                        .iter()
+                        .filter_map(|id| c.graph.node(*id))
+                        .map(|n| (n.id, n.pos))
+                        .collect();
+                    self.drag = Drag::Nodes {
+                        start,
+                        offset: Vec2::ZERO,
+                    };
+                }
+                Hit::Macro(gid, i) => {
+                    let pp = c.graph.group(gid).and_then(|g| g.published.get(i)).cloned();
+                    let bar = boxes
+                        .iter()
+                        .find(|b| b.id == gid)
+                        .and_then(|b| b.macros.iter().find(|m| m.0 == i))
+                        .map(|m| m.2.width())
+                        .unwrap_or(100.0);
+                    if let Some(pp) = pp
+                        && let Some(ParamValue::Float(v)) = c
+                            .graph
+                            .node(pp.node)
+                            .and_then(|n| n.param(&pp.param))
+                            .map(|p| &p.value)
+                    {
+                        self.drag = Drag::Macro {
+                            node: pp.node,
+                            param: pp.param,
+                            start: *v,
+                            offset: 0.0,
+                            width: bar,
+                        };
+                    }
+                }
+                Hit::GroupToggle(_) => {}
                 Hit::None => {
                     if !add_select {
                         self.selected.clear();
@@ -564,6 +921,34 @@ impl Editor {
                         });
                     }
                 }
+                Drag::Macro {
+                    node,
+                    param,
+                    start,
+                    offset,
+                    width,
+                } => {
+                    *offset += d.x;
+                    if let Some(def) = c
+                        .graph
+                        .node(*node)
+                        .and_then(|n| n.param(param))
+                        .map(|p| &p.def)
+                    {
+                        let fine = if ui.input(|i| i.modifiers.shift) {
+                            0.1
+                        } else {
+                            1.0
+                        };
+                        let v = (*start + *offset / width.max(1.0) * (def.max - def.min) * fine)
+                            .clamp(def.min, def.max);
+                        cmds.push(Command::SetParam {
+                            node: *node,
+                            param: param.clone(),
+                            value: ParamValue::Float(v),
+                        });
+                    }
+                }
                 Drag::FrameResize { id, start, offset } => {
                     *offset += d;
                     if let Some(f) = c.graph.frame(*id) {
@@ -578,9 +963,14 @@ impl Editor {
                 _ => {}
             }
             if !cmds.is_empty() {
+                let key = if matches!(self.drag, Drag::Macro { .. }) {
+                    "macro"
+                } else {
+                    "move"
+                };
                 let _ = c
                     .history
-                    .exec_merge(c.graph, Command::Batch(cmds), Some("move"));
+                    .exec_merge(c.graph, Command::Batch(cmds), Some(key));
             }
         }
         if resp.drag_stopped() {
@@ -598,6 +988,11 @@ impl Editor {
                         for (id, l) in &layouts {
                             if b.intersects(l.rect) {
                                 self.selected.insert(*id);
+                            }
+                        }
+                        for g in &boxes {
+                            if b.intersects(g.rect) {
+                                self.selected.extend(g.members.iter().copied());
                             }
                         }
                     }
@@ -618,6 +1013,14 @@ impl Editor {
                         self.selected = BTreeSet::from([n]);
                     }
                 }
+                Hit::Group(id) | Hit::Macro(id, _) => {
+                    if add_select {
+                        self.selected.extend(c.graph.group_members(id));
+                    } else {
+                        self.select_group(c.graph, id);
+                    }
+                }
+                Hit::GroupToggle(id) => self.toggle_group(&mut c, id),
                 _ => self.selected.clear(),
             }
         }
@@ -628,9 +1031,15 @@ impl Editor {
                 Hit::None => self.open_search(ui.ctx()),
                 Hit::FrameTitle(id) => {
                     if let Some(f) = c.graph.frame(id) {
-                        self.frame_rename = Some((id, f.label.clone(), p));
+                        self.rename = Some((Rename::Frame(id), f.label.clone(), p));
                     }
                 }
+                Hit::Group(id) => match c.graph.group(id) {
+                    // Double-click a box opens it; an open group's title renames.
+                    Some(g) if g.collapsed => self.toggle_group(&mut c, id),
+                    Some(g) => self.rename = Some((Rename::Group(id), g.label.clone(), p)),
+                    None => {}
+                },
                 _ => {}
             }
         }
@@ -644,15 +1053,22 @@ impl Editor {
             {
                 self.selected = BTreeSet::from([n]);
             }
+            if let Hit::Group(id) | Hit::GroupToggle(id) | Hit::Macro(id, _) = self.menu_target {
+                self.select_group(c.graph, id);
+            }
         }
         let mut action: Option<MenuAction> = None;
         let selected_count = self.selected.len();
         let menu_target = self.menu_target.clone();
+        let in_group = self.group_to_ungroup(c.graph);
         resp.context_menu(|ui| {
             action = match &menu_target {
                 Hit::None => add_menu(ui, c.catalogue, selected_count),
                 Hit::FrameTitle(id) | Hit::FrameResize(id) => frame_menu(ui, *id),
-                _ => node_menu(ui, selected_count),
+                Hit::Group(id) | Hit::GroupToggle(id) | Hit::Macro(id, _) => {
+                    c.graph.group(*id).and_then(|g| group_menu(ui, g))
+                }
+                _ => node_menu(ui, selected_count, in_group.is_some()),
             };
         });
 
@@ -690,6 +1106,40 @@ impl Editor {
                         None => desc,
                     }
                 }),
+                Hit::Group(id) => c.graph.group(id).map(|g| {
+                    let n = c.graph.group_members(id).len();
+                    if g.collapsed {
+                        format!(
+                            "Group \"{}\" · {n} nodes folded into one box.\n\
+                             Double-click to open it. Drag the bars to turn its macro knobs.",
+                            g.label
+                        )
+                    } else {
+                        format!(
+                            "Group \"{}\" · {n} nodes. Drag the title to move them all, \
+                             ▾ folds them into one box, double-click to rename.",
+                            g.label
+                        )
+                    }
+                }),
+                Hit::GroupToggle(id) => c.graph.group(id).map(|g| {
+                    if g.collapsed {
+                        "Open the group".to_string()
+                    } else {
+                        "Fold the group into one box".to_string()
+                    }
+                }),
+                Hit::Macro(id, i) => c
+                    .graph
+                    .group(id)
+                    .and_then(|g| g.published.get(i))
+                    .map(|pp| {
+                        format!(
+                            "Macro knob \"{}\": drives node {} · {}. Drag sideways \
+                             (Shift = fine).",
+                            pp.label, pp.node, pp.param
+                        )
+                    }),
                 _ => None,
             };
             if let Some(t) = tip.filter(|t| !t.is_empty()) {
@@ -713,6 +1163,9 @@ impl Editor {
                         || i.consume_key(egui::Modifiers::COMMAND, Key::Y),
                     undo: i.consume_key(egui::Modifiers::COMMAND, Key::Z),
                     bypass: i.consume_key(egui::Modifiers::COMMAND, Key::D),
+                    ungroup: i
+                        .consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, Key::G),
+                    group: i.consume_key(egui::Modifiers::COMMAND, Key::G),
                     all: i.consume_key(egui::Modifiers::COMMAND, Key::A),
                     home: i.key_pressed(Key::Home),
                     serial: !cmd && i.key_pressed(Key::S),
@@ -742,6 +1195,17 @@ impl Editor {
                 }
                 if keys.bypass {
                     action = Some(MenuAction::Bypass);
+                }
+                if keys.group {
+                    action = Some(MenuAction::Group);
+                }
+                if keys.ungroup {
+                    match self.group_to_ungroup(c.graph) {
+                        Some(id) => action = Some(MenuAction::Ungroup(id)),
+                        None => {
+                            self.say(ui, "Select a group (click its title or box) to ungroup it.")
+                        }
+                    }
                 }
                 if keys.all {
                     self.selected = c.graph.nodes().iter().map(|n| n.id).collect();
@@ -868,20 +1332,117 @@ impl Editor {
                 );
             }
         }
+        // Open groups (outermost first, so inner ones sit on top).
+        for d in backdrops.iter().rev() {
+            let r = Rect::from_min_max(to_screen(self, d.rect.min), to_screen(self, d.rect.max));
+            let picked = self.focus_group == Some(d.id);
+            let all_selected =
+                !d.members.is_empty() && d.members.iter().all(|m| self.selected.contains(m));
+            painter.rect_filled(
+                r,
+                8.0,
+                GROUP_COLOUR.gamma_multiply(0.035 + 0.02 * d.depth as f32),
+            );
+            painter.rect_stroke(
+                r,
+                8.0,
+                if picked {
+                    Stroke::new(2.0, ACCENT)
+                } else if all_selected {
+                    Stroke::new(1.5, ACCENT.gamma_multiply(0.6))
+                } else {
+                    Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.35))
+                },
+                StrokeKind::Inside,
+            );
+            let title = Rect::from_min_size(r.min, vec2(r.width(), GROUP_TITLE_H * z));
+            painter.rect_filled(
+                title,
+                CornerRadius {
+                    nw: 8,
+                    ne: 8,
+                    sw: 0,
+                    se: 0,
+                },
+                GROUP_COLOUR.gamma_multiply(0.14),
+            );
+            let font = FontId::proportional((12.0 * z).clamp(6.0, 20.0));
+            painter.text(
+                title.left_center() + vec2(8.0 * z, 0.0),
+                Align2::LEFT_CENTER,
+                "▾",
+                FontId::proportional((16.0 * z).clamp(8.0, 24.0)),
+                GROUP_COLOUR,
+            );
+            painter.text(
+                title.left_center() + vec2(GROUP_TITLE_H * z, 0.0),
+                Align2::LEFT_CENTER,
+                format!("{}  ·  {} nodes", d.label, d.members.len()),
+                font,
+                TEXT,
+            );
+            if self.show_cost
+                && let Some(g) = c.gpu
+            {
+                let ms: f32 = d.members.iter().filter_map(|m| g.get(m)).sum();
+                if ms > 0.0 {
+                    painter.text(
+                        title.right_center() - vec2(8.0 * z, 0.0),
+                        Align2::RIGHT_CENTER,
+                        format!("{ms:.2} ms"),
+                        FontId::proportional((10.0 * z).clamp(5.0, 15.0)),
+                        cost_colour(ms),
+                    );
+                }
+            }
+        }
         let lay: HashMap<NodeId, &Layout> = layouts.iter().map(|(id, l)| (*id, l)).collect();
+        let box_of = |gid: GroupId| boxes.iter().find(|b| b.id == gid);
+        // Where a wire starts / ends (on a node, or on the box hiding it).
+        let out_at = |o: &OutputRef| -> Option<(PortType, Pos2)> {
+            match hidden.get(&o.node) {
+                Some(gid) => box_of(*gid)?
+                    .outputs
+                    .iter()
+                    .find(|x| x.0 == *o)
+                    .map(|x| (x.2, x.3)),
+                None => lay
+                    .get(&o.node)?
+                    .outputs
+                    .iter()
+                    .find(|x| x.0 == o.port)
+                    .map(|x| (x.2, x.3)),
+            }
+        };
+        let in_at = |e: &Endpoint| -> Option<Pos2> {
+            match hidden.get(&e.node()) {
+                Some(gid) => box_of(*gid)?.inputs.iter().find(|x| x.0 == *e).map(|x| x.3),
+                None => {
+                    let b = lay.get(&e.node())?;
+                    match e {
+                        Endpoint::Input { port, .. } => {
+                            b.inputs.iter().find(|i| &i.0 == port).map(|i| i.3)
+                        }
+                        Endpoint::Param { param, .. } => {
+                            b.mods.iter().find(|m| &m.0 == param).map(|m| m.2)
+                        }
+                    }
+                }
+            }
+        };
         let wire_w = (2.0 * z).clamp(1.0, 3.0);
         for l in c.graph.links() {
-            let (Some(a), Some(b)) = (lay.get(&l.from.node), lay.get(&l.to.node())) else {
+            if let (Some(a), Some(b)) = (hidden.get(&l.from.node), hidden.get(&l.to.node()))
+                && a == b
+            {
+                continue; // inside a folded group
+            }
+            let Some((ty, from)) = out_at(&l.from) else {
                 continue;
             };
-            let Some((_, _, ty, from)) = a.outputs.iter().find(|o| o.0 == l.from.port) else {
-                continue;
-            };
-            let to = match &l.to {
-                Endpoint::Input { port, .. } => b.inputs.iter().find(|i| &i.0 == port).map(|i| i.3),
-                Endpoint::Param { param, .. } => b.mods.iter().find(|m| &m.0 == param).map(|m| m.2),
-            };
-            let Some(to) = to else { continue };
+            let ty = &ty;
+            let from = &from;
+            let Some(to) = in_at(&l.to) else { continue };
             let mut col = port_colour(*ty);
             let mut w = wire_w;
             match ty {
@@ -917,22 +1478,36 @@ impl Editor {
             let Some(n) = c.graph.node(*id) else { continue };
             self.draw_node(&painter, &c, n, l, &to_screen, now);
         }
+        for b in &boxes {
+            self.draw_box(&painter, &c, b, &to_screen);
+        }
         // The wire being dragged, on top of everything (it may leave the panel).
         if let (Drag::Wire { from, ty }, Some(p)) = (&self.drag, pointer)
-            && let Some(l) = lay.get(&from.node)
-            && let Some(o) = l.outputs.iter().find(|o| o.0 == from.port)
+            && let Some((_, start)) = out_at(from)
         {
             let fg = ui
                 .ctx()
                 .layer_painter(LayerId::new(Order::Foreground, Id::unique("wire-drag")));
             wire(
                 &fg,
-                to_screen(self, o.3),
+                to_screen(self, start),
                 p,
                 port_colour(*ty),
                 wire_w + 0.5,
                 z,
             );
+            for b in &boxes {
+                for (e, _, _, at) in &b.inputs {
+                    let link = Link::new(from.clone(), e.clone());
+                    if matches!(e, Endpoint::Input { .. }) && c.graph.check_link(&link).is_ok() {
+                        painter.circle_stroke(
+                            to_screen(self, *at),
+                            PORT_R * z + 3.0,
+                            Stroke::new(1.5, port_colour(*ty)),
+                        );
+                    }
+                }
+            }
             // Light up the plugs it can go into.
             for (id, l) in &layouts {
                 for (name, _, _, at) in &l.inputs {
@@ -991,7 +1566,212 @@ impl Editor {
         }
         self.search_ui(ui, &mut c);
         self.param_pick_ui(ui, &mut c);
-        self.frame_rename_ui(ui, &mut c);
+        self.rename_ui(ui, &mut c);
+    }
+
+    /// Fold / unfold a group (one undo step).
+    fn toggle_group(&mut self, c: &mut Ctx, id: GroupId) {
+        if let Some(g) = c.graph.group(id) {
+            let g = Group {
+                collapsed: !g.collapsed,
+                ..g.clone()
+            };
+            let _ = c.history.exec(c.graph, Command::PutGroup(g));
+        }
+    }
+
+    /// A collapsed group: header, crossing plugs, macro knobs, picture.
+    fn draw_box(
+        &self,
+        painter: &egui::Painter,
+        c: &Ctx,
+        b: &GroupBox,
+        to_screen: &dyn Fn(&Self, Pos2) -> Pos2,
+    ) {
+        let z = self.zoom;
+        let r = Rect::from_min_max(to_screen(self, b.rect.min), to_screen(self, b.rect.max));
+        if !painter.clip_rect().intersects(r.expand(20.0)) {
+            return;
+        }
+        let round = CornerRadius::same((6.0 * z).round().clamp(2.0, 12.0) as u8);
+        // A second card peeking out behind: "there's more inside".
+        painter.rect_filled(
+            r.translate(vec2(5.0, 5.0) * z),
+            round,
+            lerp_colour(NODE_BG, GROUP_COLOUR, 0.08),
+        );
+        painter.rect_stroke(
+            r.translate(vec2(5.0, 5.0) * z),
+            round,
+            Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.25)),
+            StrokeKind::Outside,
+        );
+        painter.rect_filled(r, round, lerp_colour(NODE_BG, GROUP_COLOUR, 0.06));
+        let head = Rect::from_min_size(r.min, vec2(r.width(), HEADER_H * z));
+        painter.rect_filled(
+            head,
+            CornerRadius {
+                nw: round.nw,
+                ne: round.ne,
+                sw: 0,
+                se: 0,
+            },
+            lerp_colour(NODE_HEADER, GROUP_COLOUR, 0.3),
+        );
+        let font = FontId::proportional((12.5 * z).clamp(6.0, 20.0));
+        let small = FontId::proportional((11.0 * z).clamp(5.0, 18.0));
+        painter.text(
+            head.left_center() + vec2(8.0 * z, 0.0),
+            Align2::LEFT_CENTER,
+            "▸",
+            FontId::proportional((16.0 * z).clamp(8.0, 24.0)),
+            GROUP_COLOUR,
+        );
+        painter.text(
+            head.left_center() + vec2(24.0 * z, 0.0),
+            Align2::LEFT_CENTER,
+            truncate(&b.label, 16),
+            font,
+            TEXT,
+        );
+        let errors = b.members.iter().any(|m| c.eval.errors.contains_key(m));
+        let right = if errors {
+            Some(("⚠".to_string(), ERROR))
+        } else if self.show_cost
+            && let Some(g) = c.gpu
+        {
+            let ms: f32 = b.members.iter().filter_map(|m| g.get(m)).sum();
+            (ms > 0.0).then(|| (format!("{ms:.2} ms"), cost_colour(ms)))
+        } else {
+            Some((format!("{}", b.members.len()), TEXT_DIM))
+        };
+        if let Some((t, col)) = right {
+            painter.text(
+                head.right_center() - vec2(8.0 * z, 0.0),
+                Align2::RIGHT_CENTER,
+                t,
+                small.clone(),
+                col,
+            );
+        }
+        let show_labels = z > 0.5;
+        for (_, label, ty, at) in &b.inputs {
+            let p = to_screen(self, *at);
+            port(painter, p, *ty, z, 1.0, true);
+            if show_labels {
+                painter.text(
+                    p + vec2(9.0 * z, 0.0),
+                    Align2::LEFT_CENTER,
+                    truncate(label, 13),
+                    small.clone(),
+                    TEXT_DIM,
+                );
+            }
+        }
+        for (_, label, ty, at) in &b.outputs {
+            let p = to_screen(self, *at);
+            port(painter, p, *ty, z, 1.0, true);
+            if show_labels {
+                painter.text(
+                    p - vec2(9.0 * z, 0.0),
+                    Align2::RIGHT_CENTER,
+                    label,
+                    small.clone(),
+                    TEXT_DIM,
+                );
+            }
+        }
+        // Macro knobs: label, value, a bar you can drag.
+        let group = c.graph.group(b.id);
+        for (i, label, bar) in &b.macros {
+            let Some(pp) = group.and_then(|g| g.published.get(*i)) else {
+                continue;
+            };
+            let param = c.graph.node(pp.node).and_then(|n| n.param(&pp.param));
+            let br = Rect::from_min_max(to_screen(self, bar.min), to_screen(self, bar.max));
+            let text_at = pos2(br.left(), br.top() - 3.0 * z);
+            let (value_text, frac, live) = match param.map(|p| (&p.value, &p.def)) {
+                Some((ParamValue::Float(v), def)) => {
+                    let span = (def.max - def.min).max(1e-6);
+                    let live = c
+                        .eval
+                        .live_value(pp.node, &pp.param)
+                        .map(|l| ((l - def.min) / span).clamp(0.0, 1.0));
+                    (
+                        format!("{v:.2}"),
+                        Some(((v - def.min) / span).clamp(0.0, 1.0)),
+                        live,
+                    )
+                }
+                Some((ParamValue::Bool(on), _)) => {
+                    ((if *on { "on" } else { "off" }).to_string(), None, None)
+                }
+                Some((ParamValue::Choice(k), def)) => (
+                    def.options
+                        .get(*k as usize)
+                        .cloned()
+                        .unwrap_or_default()
+                        .replace('_', " "),
+                    None,
+                    None,
+                ),
+                Some(_) => (String::new(), None, None),
+                None => ("missing".into(), None, None),
+            };
+            if show_labels {
+                painter.text(
+                    text_at,
+                    Align2::LEFT_BOTTOM,
+                    truncate(label, 18),
+                    small.clone(),
+                    GROUP_COLOUR,
+                );
+                painter.text(
+                    pos2(br.right(), text_at.y),
+                    Align2::RIGHT_BOTTOM,
+                    value_text,
+                    small.clone(),
+                    TEXT_DIM,
+                );
+            }
+            if let Some(f) = frac {
+                painter.rect_filled(br, 2.0, Color32::from_gray(26));
+                let mut fill = br;
+                fill.set_width(br.width() * f);
+                painter.rect_filled(fill, 2.0, GROUP_COLOUR.gamma_multiply(0.8));
+                if let Some(l) = live
+                    && (l - f).abs() > 0.005
+                {
+                    let x = br.left() + br.width() * l;
+                    painter.line_segment(
+                        [pos2(x, br.top() - 2.0 * z), pos2(x, br.bottom() + 2.0 * z)],
+                        Stroke::new(2.0, port_colour(PortType::Signal)),
+                    );
+                }
+            }
+        }
+        if let Some((node, t)) = b.thumb {
+            let tr = Rect::from_min_max(to_screen(self, t.min), to_screen(self, t.max));
+            painter.rect_filled(tr, 3.0, Color32::BLACK);
+            if let Some(tex) = c.thumbs.get(&node) {
+                painter.image(
+                    *tex,
+                    tr,
+                    Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+        }
+        let picked = self.focus_group == Some(b.id)
+            || (!b.members.is_empty() && b.members.iter().all(|m| self.selected.contains(m)));
+        let stroke = if picked {
+            Stroke::new(2.0, ACCENT)
+        } else if errors {
+            Stroke::new(1.0, ERROR)
+        } else {
+            Stroke::new(1.0, GROUP_COLOUR.gamma_multiply(0.5))
+        };
+        painter.rect_stroke(r, round, stroke, StrokeKind::Outside);
     }
 
     /// 1 just after a trigger node fired, fading to 0.
@@ -1194,6 +1974,33 @@ impl Editor {
                 );
             }
         }
+        // GPU cost: on the thumbnail's corner, else at the header's end.
+        if self.show_cost
+            && show_labels
+            && let Some(ms) = c.gpu.and_then(|g| g.get(&n.id))
+        {
+            let col = cost_colour(*ms);
+            let text = format!("{ms:.2} ms");
+            let font = FontId::proportional((10.0 * z).clamp(5.0, 15.0));
+            let (at, align) = match l.thumb {
+                Some(t) => (
+                    to_screen(self, t.max) - vec2(4.0, 3.0) * z,
+                    Align2::RIGHT_BOTTOM,
+                ),
+                None => (
+                    head.right_center() - vec2(if badge.is_some() { 26.0 } else { 8.0 } * z, 0.0),
+                    Align2::RIGHT_CENTER,
+                ),
+            };
+            let galley = painter.layout_no_wrap(text, font, col);
+            let tr = align.anchor_size(at, galley.size());
+            painter.rect_filled(
+                tr.expand2(vec2(3.0, 1.0) * z),
+                3.0,
+                Color32::from_black_alpha(150),
+            );
+            painter.galley(tr.min, galley, col);
+        }
         let stroke = if self.selected.contains(&n.id) {
             Stroke::new(2.0, ACCENT)
         } else if error.is_some() {
@@ -1244,7 +2051,7 @@ impl Editor {
                     .unwrap_or_default();
                 if ty == PortType::Signal && fits.is_empty() {
                     if node.is_some_and(|n| n.params.iter().any(|p| p.def.is_modulatable())) {
-                        self.param_pick = Some((from, n, p));
+                        self.param_pick = Some((from, PickOn::Node(n), p));
                     } else {
                         self.say(ui, "That node has nothing a signal can drive.");
                     }
@@ -1259,6 +2066,32 @@ impl Editor {
             Hit::None => {
                 // Dropped on empty space: add a node already wired to it.
                 self.open_search_with(ui.ctx(), Insert::FromWire(from, ty));
+                return;
+            }
+            Hit::Group(id) | Hit::Macro(id, _) | Hit::GroupToggle(id) => {
+                let folded = c.graph.group(id).is_some_and(|g| g.collapsed);
+                let any_macro = c.graph.group(id).is_some_and(|g| {
+                    g.published.iter().any(|pp| {
+                        c.graph
+                            .node(pp.node)
+                            .and_then(|n| n.param(&pp.param))
+                            .is_some_and(|p| p.def.is_modulatable())
+                    })
+                });
+                if ty == PortType::Signal && folded && any_macro {
+                    self.param_pick = Some((from, PickOn::Group(id), p));
+                } else if ty == PortType::Signal && folded {
+                    self.say(
+                        ui,
+                        "This group has no macro knobs yet. Open it, then right-click a slider \
+                         in the Inspector → Publish.",
+                    );
+                } else {
+                    self.say(
+                        ui,
+                        "Drop it on a plug of the group, or open the group first.",
+                    );
+                }
                 return;
             }
             _ => None,
@@ -1278,13 +2111,43 @@ impl Editor {
     }
 
     fn param_pick_ui(&mut self, ui: &egui::Ui, c: &mut Ctx) {
-        let Some((from, node, at)) = self.param_pick.clone() else {
+        let Some((from, on, at)) = self.param_pick.clone() else {
             return;
         };
-        let Some(n) = c.graph.node(node) else {
+        // (node, param, label) choices.
+        let choices: Vec<(NodeId, String, String)> = match &on {
+            PickOn::Node(node) => c
+                .graph
+                .node(*node)
+                .map(|n| {
+                    n.params
+                        .iter()
+                        .filter(|p| p.def.is_modulatable())
+                        .map(|p| (*node, p.def.name.clone(), p.def.label().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            PickOn::Group(id) => c
+                .graph
+                .group(*id)
+                .map(|g| {
+                    g.published
+                        .iter()
+                        .filter(|pp| {
+                            c.graph
+                                .node(pp.node)
+                                .and_then(|n| n.param(&pp.param))
+                                .is_some_and(|p| p.def.is_modulatable())
+                        })
+                        .map(|pp| (pp.node, pp.param.clone(), pp.label.clone()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+        if choices.is_empty() {
             self.param_pick = None;
             return;
-        };
+        }
         let mut pick = None;
         let mut close = ui.input(|i| i.key_pressed(Key::Escape));
         let area = egui::Area::new(Id::unique("param-pick"))
@@ -1296,9 +2159,9 @@ impl Editor {
                     egui::ScrollArea::vertical()
                         .max_height(300.0)
                         .show(ui, |ui| {
-                            for p in n.params.iter().filter(|p| p.def.is_modulatable()) {
-                                if ui.button(p.def.label()).clicked() {
-                                    pick = Some(p.def.name.clone());
+                            for (node, param, label) in &choices {
+                                if ui.button(label).clicked() {
+                                    pick = Some((*node, param.clone()));
                                 }
                             }
                         });
@@ -1315,7 +2178,7 @@ impl Editor {
         {
             close = true;
         }
-        if let Some(param) = pick {
+        if let Some((node, param)) = pick {
             let link = Link {
                 modulation: Some(crate::graph_view::default_wire(c.graph, &from)),
                 ..Link::new(from, Endpoint::param(node, &param))
@@ -1330,8 +2193,8 @@ impl Editor {
         }
     }
 
-    fn frame_rename_ui(&mut self, ui: &egui::Ui, c: &mut Ctx) {
-        let Some((id, mut text, at)) = self.frame_rename.take() else {
+    fn rename_ui(&mut self, ui: &egui::Ui, c: &mut Ctx) {
+        let Some((what, mut text, at)) = self.rename.take() else {
             return;
         };
         let mut done = false;
@@ -1353,17 +2216,25 @@ impl Editor {
                 });
             });
         if done {
-            if let Some(f) = c.graph.frame(id) {
-                let _ = c.history.exec(
-                    c.graph,
+            let cmd = match what {
+                Rename::Frame(id) => c.graph.frame(id).map(|f| {
                     Command::PutFrame(Frame {
                         label: text,
                         ..f.clone()
-                    }),
-                );
+                    })
+                }),
+                Rename::Group(id) => c.graph.group(id).map(|g| {
+                    Command::PutGroup(Group {
+                        label: text,
+                        ..g.clone()
+                    })
+                }),
+            };
+            if let Some(cmd) = cmd {
+                let _ = c.history.exec(c.graph, cmd);
             }
         } else if !cancel {
-            self.frame_rename = Some((id, text, at));
+            self.rename = Some((what, text, at));
         }
     }
 
@@ -1517,7 +2388,7 @@ impl Editor {
                         Endpoint::input(new, &p.name),
                     ))),
                     None if ty == PortType::Signal => {
-                        self.param_pick = Some((from, new, screen));
+                        self.param_pick = Some((from, PickOn::Node(new), screen));
                         return;
                     }
                     None => return,
@@ -1679,6 +2550,26 @@ impl Editor {
                 .cloned()
                 .collect(),
             frames: Vec::new(),
+            // Groups whose every node is copied come along.
+            groups: {
+                let whole: Vec<GroupId> = g
+                    .groups()
+                    .iter()
+                    .map(|x| x.id)
+                    .filter(|id| {
+                        let m = g.group_members(*id);
+                        !m.is_empty() && m.iter().all(|n| self.selected.contains(n))
+                    })
+                    .collect();
+                g.groups()
+                    .iter()
+                    .filter(|x| whole.contains(&x.id))
+                    .map(|x| Group {
+                        parent: x.parent.filter(|p| whole.contains(p)),
+                        ..x.clone()
+                    })
+                    .collect()
+            },
         }
     }
 
@@ -1693,9 +2584,53 @@ impl Editor {
                 if sel.is_empty() {
                     return;
                 }
-                let cmds = sel.iter().map(|id| Command::RemoveNode(*id)).collect();
+                let mut cmds: Vec<Command> =
+                    sel.iter().map(|id| Command::RemoveNode(*id)).collect();
+                // Groups left with nothing in them go too.
+                for g in c.graph.groups() {
+                    let m = c.graph.group_members(g.id);
+                    if m.iter().all(|n| self.selected.contains(n)) {
+                        cmds.push(Command::RemoveGroup(g.id));
+                    }
+                }
                 let _ = c.history.exec(c.graph, Command::Batch(cmds));
                 self.selected.clear();
+                self.focus_group = None;
+            }
+            MenuAction::Group => {
+                if sel.is_empty() {
+                    return self.say(ui, "Select some nodes first, then Ctrl+G groups them.");
+                }
+                let label = format!("Group {}", c.graph.groups().len() + 1);
+                match c.graph.group_nodes(&sel, &label) {
+                    Ok((id, cmd)) => match c.history.exec(c.graph, cmd) {
+                        Ok(()) => {
+                            self.select_group(c.graph, id);
+                            self.say(
+                                ui,
+                                "Grouped. ▾ on its title folds it into one box; Ctrl+Shift+G ungroups.",
+                            );
+                        }
+                        Err(e) => self.say(ui, e.to_string()),
+                    },
+                    Err(e) => self.say(ui, e.to_string()),
+                }
+            }
+            MenuAction::Ungroup(id) => {
+                let _ = c.history.exec(c.graph, Command::RemoveGroup(id));
+                self.focus_group = None;
+            }
+            MenuAction::UngroupSelected => {
+                if let Some(id) = self.group_to_ungroup(c.graph) {
+                    self.run_action(ui, c, MenuAction::Ungroup(id));
+                }
+            }
+            MenuAction::ToggleGroup(id) => self.toggle_group(c, id),
+            MenuAction::RenameGroup(id) => {
+                if let Some(g) = c.graph.group(id) {
+                    let at = ui.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
+                    self.rename = Some((Rename::Group(id), g.label.clone(), at));
+                }
             }
             MenuAction::Bypass => {
                 let any_on = sel
@@ -1749,8 +2684,10 @@ impl Editor {
                     .map(|n| Command::RemoveNode(n.id))
                     .collect();
                 cmds.extend(c.graph.frames().iter().map(|f| Command::RemoveFrame(f.id)));
+                cmds.extend(c.graph.groups().iter().map(|g| Command::RemoveGroup(g.id)));
                 let _ = c.history.exec(c.graph, Command::Batch(cmds));
                 self.selected.clear();
+                self.focus_group = None;
             }
             MenuAction::Starter => match nodes::demo::build(c.library) {
                 Ok((g, _)) => {
@@ -1758,6 +2695,7 @@ impl Editor {
                         nodes: g.nodes().to_vec(),
                         links: g.links().to_vec(),
                         frames: g.frames().to_vec(),
+                        groups: g.groups().to_vec(),
                     };
                     if let Ok(text) = ron::to_string(&clip) {
                         self.paste(ui, c, &format!("{CLIP_TAG}{text}"), None);
@@ -1808,7 +2746,7 @@ impl Editor {
             MenuAction::RenameFrame(id) => {
                 if let Some(f) = c.graph.frame(id) {
                     let at = ui.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::ZERO);
-                    self.frame_rename = Some((id, f.label.clone(), at));
+                    self.rename = Some((Rename::Frame(id), f.label.clone(), at));
                 }
             }
             MenuAction::SelectInFrame(id) => {
@@ -1892,6 +2830,48 @@ impl Editor {
                 ..f.clone()
             }));
         }
+        // Groups: parents before children, with new numbers.
+        let mut gmap: HashMap<GroupId, GroupId> = HashMap::new();
+        let mut left: Vec<&Group> = clip.groups.iter().collect();
+        while !left.is_empty() {
+            let before = left.len();
+            left.retain(|grp| {
+                let parent = match grp.parent {
+                    None => None,
+                    Some(p) => match gmap.get(&p) {
+                        Some(np) => Some(*np),
+                        None if clip.groups.iter().any(|x| x.id == p) => return true, // later
+                        None => None,
+                    },
+                };
+                let id = c.graph.new_group_id();
+                gmap.insert(grp.id, id);
+                cmds.push(Command::PutGroup(Group {
+                    id,
+                    parent,
+                    nodes: grp
+                        .nodes
+                        .iter()
+                        .filter_map(|n| map.get(n).copied())
+                        .collect(),
+                    published: grp
+                        .published
+                        .iter()
+                        .filter_map(|pp| {
+                            Some(graph::PublishedParam {
+                                node: *map.get(&pp.node)?,
+                                ..pp.clone()
+                            })
+                        })
+                        .collect(),
+                    ..(*grp).clone()
+                }));
+                false
+            });
+            if left.len() == before {
+                break; // a loop in a bad clipboard: skip the rest
+            }
+        }
         match c.history.exec(c.graph, Command::Batch(cmds)) {
             Ok(()) => self.selected = map.values().copied().collect(),
             Err(e) => self.say(ui, e.to_string()),
@@ -1921,6 +2901,8 @@ impl Editor {
 
 struct Keys {
     events: Vec<egui::Event>,
+    group: bool,
+    ungroup: bool,
     del: bool,
     redo: bool,
     undo: bool,
@@ -1951,6 +2933,11 @@ enum MenuAction {
     RenameFrame(u32),
     SelectInFrame(u32),
     RemoveFrame(u32),
+    Group,
+    Ungroup(GroupId),
+    UngroupSelected,
+    ToggleGroup(GroupId),
+    RenameGroup(GroupId),
 }
 
 fn add_menu(
@@ -2035,7 +3022,7 @@ fn swatches(ui: &mut egui::Ui, none: bool) -> Option<Option<[u8; 3]>> {
     pick
 }
 
-fn node_menu(ui: &mut egui::Ui, count: usize) -> Option<MenuAction> {
+fn node_menu(ui: &mut egui::Ui, count: usize, in_group: bool) -> Option<MenuAction> {
     let mut pick = None;
     let s = if count > 1 { "s" } else { "" };
     ui.label(egui::RichText::new("Colour").small().color(TEXT_DIM));
@@ -2057,6 +3044,16 @@ fn node_menu(ui: &mut egui::Ui, count: usize) -> Option<MenuAction> {
     }
     if ui.button("Put in a frame").clicked() {
         pick = Some(MenuAction::AddFrame);
+    }
+    if ui
+        .button(format!("Group node{s}   Ctrl+G"))
+        .on_hover_text("Fold into one box with its own macro knobs")
+        .clicked()
+    {
+        pick = Some(MenuAction::Group);
+    }
+    if in_group && ui.button("Ungroup   Ctrl+Shift+G").clicked() {
+        pick = Some(MenuAction::UngroupSelected);
     }
     ui.separator();
     if ui.button(format!("Delete node{s}   Del")).clicked() {
@@ -2090,6 +3087,53 @@ fn frame_menu(ui: &mut egui::Ui, id: u32) -> Option<MenuAction> {
     pick
 }
 
+fn group_menu(ui: &mut egui::Ui, g: &Group) -> Option<MenuAction> {
+    let mut pick = None;
+    ui.label(
+        egui::RichText::new(format!("Group \"{}\"", g.label))
+            .small()
+            .color(TEXT_DIM),
+    );
+    let fold = if g.collapsed {
+        "Open   (double-click)"
+    } else {
+        "Fold into one box"
+    };
+    if ui.button(fold).clicked() {
+        pick = Some(MenuAction::ToggleGroup(g.id));
+    }
+    if ui.button("Rename").clicked() {
+        pick = Some(MenuAction::RenameGroup(g.id));
+    }
+    if ui.button("Duplicate").clicked() {
+        pick = Some(MenuAction::Duplicate);
+    }
+    if ui.button("Copy   Ctrl+C").clicked() {
+        pick = Some(MenuAction::Copy);
+    }
+    if ui
+        .button("Group inside a new group   Ctrl+G")
+        .on_hover_text("Groups can hold groups")
+        .clicked()
+    {
+        pick = Some(MenuAction::Group);
+    }
+    ui.separator();
+    if ui
+        .button("Ungroup (keeps the nodes)   Ctrl+Shift+G")
+        .clicked()
+    {
+        pick = Some(MenuAction::Ungroup(g.id));
+    }
+    if ui.button("Delete group and its nodes   Del").clicked() {
+        pick = Some(MenuAction::Delete);
+    }
+    if pick.is_some() {
+        ui.close();
+    }
+    pick
+}
+
 /// The `?` sheet: every graph shortcut.
 fn help_overlay(painter: &egui::Painter, rect: Rect) {
     const ROWS: &[(&str, &str)] = &[
@@ -2108,6 +3152,11 @@ fn help_overlay(painter: &egui::Painter, rect: Rect) {
         ("Click / Shift+click / drag box", "select"),
         ("Del", "delete selected"),
         ("Ctrl+D", "bypass selected"),
+        ("Ctrl+G, Ctrl+Shift+G", "group selected, ungroup"),
+        (
+            "▾ / double-click a box",
+            "fold a group into a box / open it",
+        ),
         ("Ctrl+C / X / V", "copy / cut / paste (between graphs too)"),
         ("Ctrl+Z, Ctrl+Shift+Z", "undo, redo"),
         ("Ctrl+A", "select all"),
@@ -2174,6 +3223,17 @@ fn wire(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, w: f32, z: f32)
         Stroke::new(w, col),
     );
     painter.add(shape);
+}
+
+/// Green when cheap, yellow when it matters, red when it eats the frame.
+fn cost_colour(ms: f32) -> Color32 {
+    if ms < 0.5 {
+        Color32::from_rgb(130, 200, 130)
+    } else if ms < 2.0 {
+        Color32::from_rgb(230, 200, 90)
+    } else {
+        Color32::from_rgb(255, 120, 100)
+    }
 }
 
 fn lerp_colour(a: Color32, b: Color32, t: f32) -> Color32 {

@@ -303,6 +303,7 @@ fn removing_a_node_takes_its_wires_and_group_place_and_undo_restores_it() {
                 node: a,
                 param: "speed".into(),
             }],
+            collapsed: false,
         }),
     )
     .unwrap();
@@ -449,6 +450,7 @@ fn nested_groups_and_ungrouping() {
             parent,
             nodes,
             published,
+            collapsed: false,
         })
     };
     h.exec(&mut g, put(outer, None, vec![m], vec![])).unwrap();
@@ -509,6 +511,7 @@ fn save_then_load_gives_an_identical_graph() {
                 node: a,
                 param: "speed".into(),
             }],
+            collapsed: false,
         }),
     )
     .unwrap();
@@ -620,4 +623,71 @@ impl Graph {
     fn links_mut_for_test(&mut self) -> &mut Vec<Link> {
         self.links_mut()
     }
+}
+
+#[test]
+fn grouping_selected_nodes_nests_and_ungroups_cleanly() {
+    let mut g = Graph::new();
+    let mut h = History::new();
+    let [a, b, m, o, l] = sample(&mut g, &mut h);
+    let mut h = History::new();
+    let empty = g.clone();
+
+    // Group a + b, then publish a control on it.
+    let (inner, cmd) = g.group_nodes(&[a, b], "Pair").unwrap();
+    h.exec(&mut g, cmd).unwrap();
+    assert_eq!(g.group(inner).unwrap().nodes, vec![a, b]);
+    assert_eq!(g.group(inner).unwrap().parent, None);
+    let mut grp = g.group(inner).unwrap().clone();
+    grp.published.push(PublishedParam {
+        label: "Speed".into(),
+        node: a,
+        param: "speed".into(),
+    });
+    h.exec(&mut g, Command::PutGroup(grp)).unwrap();
+
+    // Grouping b (already inside "Pair") with m pulls the whole "Pair" in.
+    let (outer, cmd) = g.group_nodes(&[b, m], "Mix").unwrap();
+    h.exec(&mut g, cmd).unwrap();
+    assert_eq!(g.group(outer).unwrap().nodes, vec![m]);
+    assert_eq!(g.group(inner).unwrap().parent, Some(outer));
+    assert_eq!(g.groups_around(a), vec![inner, outer]);
+    assert_eq!(g.group_members(outer), vec![a, b, m]);
+    assert_eq!(g.group_depth(inner), 1);
+    assert!(g.group_contains(g.group(outer).unwrap(), a));
+
+    // Grouping just `a` inside "Pair" makes a group inside "Pair", and the
+    // published control on "Pair" survives (it still points inside).
+    let (deep, cmd) = g.group_nodes(&[a], "Solo").unwrap();
+    h.exec(&mut g, cmd).unwrap();
+    assert_eq!(g.group(deep).unwrap().parent, Some(inner));
+    assert_eq!(g.group(inner).unwrap().nodes, vec![b]);
+    assert_eq!(g.group(inner).unwrap().published.len(), 1);
+    assert_eq!(g.groups_around(a), vec![deep, inner, outer]);
+
+    // Ungrouping "Solo" puts `a` back into "Pair".
+    let before = g.clone();
+    h.exec(&mut g, Command::RemoveGroup(deep)).unwrap();
+    assert_eq!(g.group_of(a).unwrap().id, inner);
+    h.undo(&mut g).unwrap();
+    assert_eq!(g, before);
+
+    // Collapsing is saved with the graph.
+    let mut grp = g.group(outer).unwrap().clone();
+    grp.collapsed = true;
+    h.exec(&mut g, Command::PutGroup(grp)).unwrap();
+    let back = Graph::from_ron(&g.to_ron()).unwrap();
+    assert!(back.group(outer).unwrap().collapsed);
+
+    // Nodes in no group, mixed with grouped ones: the new group is top level.
+    let (top, cmd) = g.group_nodes(&[o, l, m], "All").unwrap();
+    h.exec(&mut g, cmd).unwrap();
+    assert_eq!(g.group(top).unwrap().parent, None);
+    assert_eq!(g.group(outer).unwrap().parent, Some(top));
+    assert!(g.group_nodes(&[], "x").is_err());
+
+    while h.can_undo() {
+        h.undo(&mut g).unwrap();
+    }
+    assert_eq!(g.groups(), empty.groups());
 }

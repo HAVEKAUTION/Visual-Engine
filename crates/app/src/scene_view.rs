@@ -455,6 +455,18 @@ impl SceneView {
             });
         }
         renderer.end_frame();
+        if self.graph_mode {
+            self.ws.gpu = renderer.node_times().map(|(times, total)| {
+                let per_node = self
+                    .ws
+                    .graph
+                    .nodes()
+                    .iter()
+                    .filter_map(|n| Some((n.id, *times.get(&self.ws.eval.key(n.id))?)))
+                    .collect();
+                (per_node, total)
+            });
+        }
 
         let Some(view) = renderer.display_view() else {
             return;

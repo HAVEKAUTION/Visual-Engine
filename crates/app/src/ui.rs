@@ -41,6 +41,7 @@ struct Prefs {
     snap: bool,
     thumbnails: bool,
     show_fps: bool,
+    show_cost: bool,
 }
 
 impl Default for Prefs {
@@ -56,6 +57,7 @@ impl Default for Prefs {
             snap: true,
             thumbnails: true,
             show_fps: true,
+            show_cost: true,
         }
     }
 }
@@ -153,6 +155,7 @@ impl VisualEngineApp {
         app.scene.ws.pip = prefs.pip;
         app.scene.ws.editor.snap = prefs.snap;
         app.scene.ws.editor.thumbnails = prefs.thumbnails;
+        app.scene.ws.editor.show_cost = prefs.show_cost;
         app.rescan_inputs();
         if let Some(path) = startup_song {
             app.load_song(path);
@@ -745,6 +748,9 @@ impl VisualEngineApp {
                     .on_hover_text("Snap nodes to the grid (G)");
                 ui.toggle_value(&mut ws.editor.thumbnails, "Thumbnails")
                     .on_hover_text("Live pictures inside nodes");
+                ui.toggle_value(&mut ws.editor.show_cost, "Cost").on_hover_text(
+                    "GPU time each node takes, in milliseconds (needs a GPU that can                      measure it). At 60 fps the whole frame has 16.7 ms.",
+                );
                 if ui
                     .add_enabled(ws.history.can_undo(), egui::Button::new("↶"))
                     .on_hover_text("Undo (Ctrl+Z)")
@@ -769,14 +775,21 @@ impl VisualEngineApp {
                     self.show_graph = true;
                     self.scene.ws.editor.show_help = !self.scene.ws.editor.show_help;
                 }
+                let gpu = match &self.scene.ws.gpu {
+                    Some((_, total)) if self.scene.graph_mode => format!(" · GPU {total:.2} ms"),
+                    _ => String::new(),
+                };
                 ui.label(
                     RichText::new(format!(
-                        "{:.0} fps · {:.1} ms",
+                        "{:.0} fps · {:.1} ms{gpu}",
                         self.scene.fps, self.scene.frame_ms
                     ))
                     .small()
                     .monospace()
                     .weak(),
+                )
+                .on_hover_text(
+                    "Frames per second and time per frame. GPU = time the graphics card                      spent on the graph's nodes (each node shows its own share).",
                 );
             });
         });
@@ -981,6 +994,7 @@ impl eframe::App for VisualEngineApp {
             snap: ws.editor.snap,
             thumbnails: ws.editor.thumbnails,
             show_fps: self.show_fps,
+            show_cost: ws.editor.show_cost,
         };
         eframe::set_value(storage, PREFS_KEY, &prefs);
     }

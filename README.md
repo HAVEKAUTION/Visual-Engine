@@ -26,7 +26,8 @@ live, performable visuals. See `CLAUDE.md` for the full brief and milestone plan
   (right-click add, wiring, Inspector with modulation, copy/paste, undo, autosave).
   Part 2: the one-screen workspace (toolbar, signal strip, theme), viewer
   Program/Selected/Wipe/PiP, live thumbnails, ten signal/trigger nodes, frames, snap,
-  colour tags, S/P/L insert. Next: groups with macro knobs, GPU cost per node.
+  colour tags, S/P/L insert. Part 3: groups (fold into a box, nest) with published
+  macro knobs, and GPU cost per node. M3 is done; next is M4 (images, video, cameras).
 
 ## Running it
 

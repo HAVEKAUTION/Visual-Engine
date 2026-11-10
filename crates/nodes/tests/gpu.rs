@@ -171,3 +171,68 @@ fn nothing_plugged_in_shows_black() {
     assert!(matches!(shown, Show::Black));
     assert!(brightness(&px) < 1.0);
 }
+
+/// With GPU timestamps, every drawn node gets a time; without, there are none.
+#[test]
+fn gpu_cost_per_node_is_measured_when_supported() {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+    let Ok(adapter) =
+        pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+    else {
+        return;
+    };
+    let timed = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
+    eprintln!("GPU timestamps supported: {timed}");
+    let desc = wgpu::DeviceDescriptor {
+        required_features: if timed {
+            wgpu::Features::TIMESTAMP_QUERY
+        } else {
+            wgpu::Features::empty()
+        },
+        ..Default::default()
+    };
+    let Ok((device, queue)) = pollster::block_on(adapter.request_device(&desc)) else {
+        return;
+    };
+    let lib = SceneLibrary::new(None);
+    let (g, out) = nodes::demo::build(&lib).unwrap();
+    let mut r = Renderer::new(&device, &queue);
+    assert_eq!(r.can_time_nodes(), timed);
+    let mut ev = Evaluator::new(1000);
+    let mut sig = SignalState::new();
+    let f = SignalFrame::default();
+    for _ in 0..12 {
+        sig.update(&f, 1.0 / 60.0, [SIZE.0 as f32, SIZE.1 as f32]);
+        r.begin_frame(SIZE);
+        let shown = ev.run(
+            &g,
+            &lib,
+            &mut r,
+            FrameInput {
+                signals: &mut sig,
+                dt: 1.0 / 60.0,
+                controls: &[0.0; 8],
+                intensity: 1.0,
+                output_size: SIZE,
+                proxy: 1.0,
+            },
+            &[out],
+            &[],
+        );
+        r.present_from([shown, Show::Black], Master::default());
+        r.end_frame();
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+    }
+    // One more frame start collects the last readings.
+    r.begin_frame(SIZE);
+    match r.node_times() {
+        None => assert!(!timed),
+        Some((times, total)) => {
+            // Picture nodes of the starter graph: tunnel, transform, aurora, merge.
+            let picture_nodes = g.nodes().iter().filter(|n| n.makes_image()).count();
+            assert_eq!(times.len(), picture_nodes, "{times:?}");
+            assert!(times.values().all(|ms| *ms >= 0.0 && *ms < 1000.0));
+            assert!(total >= 0.0);
+        }
+    }
+}

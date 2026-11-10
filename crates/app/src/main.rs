@@ -50,6 +50,7 @@ fn main() -> eframe::Result {
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([800.0, 500.0]),
         renderer: eframe::Renderer::Wgpu,
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
 
@@ -58,4 +59,23 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(ui::VisualEngineApp::new(cc, startup_song)))),
     )
+}
+
+/// egui's default GPU setup, plus GPU timestamps when the GPU has them (for
+/// the per-node cost shown in the graph).
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup};
+    use eframe::wgpu;
+    let mut config = WgpuConfiguration::default();
+    if let WgpuSetup::CreateNew(new) = &mut config.wgpu_setup {
+        let base = new.device_descriptor.clone();
+        new.device_descriptor = std::sync::Arc::new(move |adapter| {
+            let mut desc = base(adapter);
+            if adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+                desc.required_features |= wgpu::Features::TIMESTAMP_QUERY;
+            }
+            desc
+        });
+    }
+    config
 }

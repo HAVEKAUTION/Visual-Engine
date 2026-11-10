@@ -210,6 +210,9 @@ pub struct Group {
     pub nodes: Vec<NodeId>,
     #[serde(default)]
     pub published: Vec<PublishedParam>,
+    /// Shown as one box in the editor (purely visual).
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -361,6 +364,126 @@ impl Graph {
     /// The group a node belongs to directly, if any.
     pub fn group_of(&self, node: NodeId) -> Option<&Group> {
         self.groups.iter().find(|g| g.nodes.contains(&node))
+    }
+
+    /// The groups a node sits in, innermost first.
+    pub fn groups_around(&self, node: NodeId) -> Vec<GroupId> {
+        let mut out = Vec::new();
+        let mut g = self.group_of(node).map(|g| g.id);
+        while let Some(id) = g {
+            if out.contains(&id) {
+                break; // never loop, even on a bad file
+            }
+            out.push(id);
+            g = self.group(id).and_then(|g| g.parent);
+        }
+        out
+    }
+
+    /// A group's parents, innermost first (not including itself).
+    pub fn group_ancestors(&self, id: GroupId) -> Vec<GroupId> {
+        let mut out = Vec::new();
+        let mut g = self.group(id).and_then(|g| g.parent);
+        while let Some(p) = g {
+            if out.contains(&p) || p == id {
+                break;
+            }
+            out.push(p);
+            g = self.group(p).and_then(|g| g.parent);
+        }
+        out
+    }
+
+    /// How many groups `id` sits inside.
+    pub fn group_depth(&self, id: GroupId) -> usize {
+        self.group_ancestors(id).len()
+    }
+
+    /// Every node in a group, including its sub-groups', in id order.
+    pub fn group_members(&self, id: GroupId) -> Vec<NodeId> {
+        let mut out: Vec<NodeId> = self
+            .nodes
+            .iter()
+            .map(|n| n.id)
+            .filter(|n| self.groups_around(*n).contains(&id))
+            .collect();
+        out.sort();
+        out
+    }
+
+    /// One step that puts `nodes` into a new group called `label`, nested in
+    /// the innermost group they all share. Nodes from deeper groups bring
+    /// their whole sub-group along (it becomes a sub-group of the new one).
+    pub fn group_nodes(
+        &mut self,
+        nodes: &[NodeId],
+        label: &str,
+    ) -> Result<(GroupId, crate::Command), GraphError> {
+        use crate::Command;
+        if nodes.is_empty() {
+            return Err(GraphError::BadGroup(0, "nothing selected to group".into()));
+        }
+        for n in nodes {
+            self.node(*n).ok_or(GraphError::NoSuchNode(*n))?;
+        }
+        let chains: Vec<Vec<GroupId>> = nodes.iter().map(|n| self.groups_around(*n)).collect();
+        // The innermost group every node is inside.
+        let shared = chains[0]
+            .iter()
+            .copied()
+            .find(|g| chains.iter().all(|c| c.contains(g)));
+        let mut direct = Vec::new();
+        let mut children = Vec::new();
+        for (n, chain) in nodes.iter().zip(&chains) {
+            let below: Vec<GroupId> = chain
+                .iter()
+                .copied()
+                .take_while(|g| Some(*g) != shared)
+                .collect();
+            match below.last() {
+                None => direct.push(*n),
+                Some(top) => {
+                    if !children.contains(top) {
+                        children.push(*top);
+                    }
+                }
+            }
+        }
+        let id = self.new_group_id();
+        let mut cmds = Vec::new();
+        // The shared group lets go of the nodes first (its published controls
+        // are put back last, once the new group holds those nodes).
+        let parent_after = shared.and_then(|p| self.group(p)).map(|p| {
+            let mut p = p.clone();
+            p.nodes.retain(|n| !direct.contains(n));
+            p
+        });
+        if let Some(p) = &parent_after {
+            cmds.push(Command::PutGroup(Group {
+                published: Vec::new(),
+                ..p.clone()
+            }));
+        }
+        cmds.push(Command::PutGroup(Group {
+            id,
+            label: label.to_string(),
+            parent: shared,
+            nodes: direct,
+            published: Vec::new(),
+            collapsed: false,
+        }));
+        for c in children {
+            if let Some(g) = self.group(c) {
+                cmds.push(Command::PutGroup(Group {
+                    parent: Some(id),
+                    ..g.clone()
+                }));
+            }
+        }
+        if let Some(p) = parent_after {
+            cmds.push(Command::PutGroup(p));
+        }
+        Ok((id, Command::Batch(cmds)))
     }
 
     /// A new node for `spec` with the next free number (not yet in the graph:
@@ -589,7 +712,7 @@ impl Graph {
     }
 
     /// Is `node` in `g` or in one of its sub-groups?
-    fn group_contains(&self, g: &Group, node: NodeId) -> bool {
+    pub fn group_contains(&self, g: &Group, node: NodeId) -> bool {
         if g.nodes.contains(&node) {
             return true;
         }

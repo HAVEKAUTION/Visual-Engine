@@ -316,6 +316,42 @@ panel on the right, or on the keyboard (click the picture first so keys go to th
   Settings → Privacy & Security → Screen & System Audio Recording → turn it on, then
   restart the app. Needs macOS 14.2 or newer.
 
+## v2 M3 part 3 – Groups, macro knobs, GPU cost
+
+Run: `cargo run --release -p app`. Tip: right-click empty graph space → **Add starter
+graph** if your restored graph is small.
+
+**Groups**
+- [ ] Select Warehouse Tunnel and Transform (Shift+click), press **Ctrl+G**. A lilac
+      backdrop titled "Group 1" wraps them. Drag the title: both move.
+- [ ] Double-click the title, type a name, Enter: renamed.
+- [ ] Click **▾** at the left of the title: the two nodes fold into one box. Its left and
+      right plugs are the wires going in and out; the wires still work and the picture
+      doesn't change. Double-click the box: it opens again.
+- [ ] Ctrl+Z undoes fold, rename and grouping, step by step.
+- [ ] Group the group together with Aurora (select the box + Aurora, Ctrl+G): a group
+      inside a group. Ctrl+Shift+G on the outer one leaves the inner one intact.
+- [ ] Ctrl+C / Ctrl+V a whole group: the copy is grouped too.
+
+**Macro knobs**
+- [ ] Click a node inside a group. In the Inspector, right-click a setting's *name*
+      (e.g. Zoom) → **Publish to group**. The name gets a ◆.
+- [ ] Click the group's title (or its box): the Inspector shows the group with its
+      knobs. Rename a knob, move it with ↑ ↓, remove it with ✕.
+- [ ] Fold the group: the knobs show as bars on the box. Drag a bar sideways: the
+      setting changes (Shift = fine). The blue tick shows the live value when music
+      modulates it.
+- [ ] Drag a blue wire from Audio Signal onto the folded box: it asks which knob to drive.
+
+**GPU cost**
+- [ ] Every picture node shows "x.xx ms" on its thumbnail (green = cheap, yellow, red =
+      heavy). Open groups show their total on the title; folded boxes in the header.
+- [ ] Toolbar, top right: "GPU x.xx ms" is the total. **Cost** toggles the labels.
+- [ ] Set a node to Half or Quarter size in the Inspector: its number drops.
+
+Known gaps: masks (green plugs) still do nothing (M5). A folded box sits where its top-left
+node was, so it can overlap nearby nodes; drag it clear.
+
 ## v2 M3 part 2 – Workspace, signal nodes, tidy graphs
 
 Run: `cargo run --release -p app`, then open a song or press **🔊 Computer audio**.

@@ -2,6 +2,21 @@
 
 One short entry per task, newest first.
 
+## 2026-11-10 — v2 M3 part 3: groups, macro knobs, GPU cost
+- Groups: select nodes, Ctrl+G. An open group has a lilac backdrop with a title (drag it
+  to move everything, double-click to rename). ▾ folds it into one box that shows the
+  wires crossing its edge as plugs, its macro knobs and a picture; double-click the box
+  to open it again. Groups can sit inside groups. Ctrl+Shift+G ungroups (nodes stay;
+  in a nested group they move up to the parent). Copy/paste and duplicate keep groups.
+- Macro knobs: right-click any setting's name in the Inspector → Publish to group.
+  Knobs show on the folded box (drag sideways, Shift = fine) and in the group's own
+  Inspector (rename, reorder, remove). Dropping a blue wire on a folded box offers
+  its knobs.
+- GPU cost: each node shows the milliseconds it takes on the graphics card (green /
+  yellow / red); groups show their total; the toolbar shows the graph's total.
+  Uses GPU timestamps when the card has them (toolbar → Cost to hide).
+- Graph files gain the group "folded" flag (older files still load).
+
 ## 2026-11-10 — v2 M3 part 2: workspace, depth, tidy graphs
 - New one-screen workspace: toolbar (panel toggles, viewer mode, snap, thumbnails,
   undo/redo, fps, ?), Media | Looks tabs on the left, Inspector on the right, the graph

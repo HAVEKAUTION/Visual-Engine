@@ -20,6 +20,10 @@
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
 
+mod profiler;
+
+pub use profiler::MAX_TIMED;
+use profiler::Profiler;
 use scenes::{CompiledScene, Target, VERTEX_ENTRY, meta::MAX_BUFFERS};
 
 /// Format of scene outputs and buffers.
@@ -204,6 +208,8 @@ pub struct Renderer {
     display: Option<Tex>,
     /// Bumped whenever the display texture is recreated.
     generation: u64,
+    /// GPU time per node (None if the GPU can't measure it).
+    profiler: Option<Profiler>,
 }
 
 fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
@@ -372,6 +378,7 @@ impl Renderer {
             pool: Vec::new(),
             display: None,
             generation: 0,
+            profiler: Profiler::new(device, queue),
         }
     }
 
@@ -452,6 +459,9 @@ impl Renderer {
     /// Start a frame at `size` pixels. A new size recreates every target
     /// (feedback restarts from black).
     pub fn begin_frame(&mut self, size: (u32, u32)) {
+        if let Some(p) = &mut self.profiler {
+            p.collect(&self.device);
+        }
         let size = (size.0.clamp(1, MAX_SIZE), size.1.clamp(1, MAX_SIZE));
         if self.size != size || self.display.is_none() {
             self.size = size;
@@ -472,7 +482,7 @@ impl Renderer {
             Some(t) => t,
             None => DeckTargets::new(&self.device, self.size, &format!("deck {deck}")),
         };
-        self.draw(&mut t, scene, signals, params, [None, None]);
+        self.draw(&mut t, scene, signals, params, [None, None], None);
         self.decks[deck] = Some(t);
     }
 
@@ -503,8 +513,9 @@ impl Renderer {
                 self.pooled(size, key)
             }
         };
+        let slot = self.profiler.as_mut().and_then(|p| p.slot(key));
         let views = inputs.map(|k| k.and_then(|k| self.nodes.get(&k)).map(|t| t.latest()));
-        self.draw(&mut t, scene, signals, params, views);
+        self.draw(&mut t, scene, signals, params, views, slot);
         self.nodes.insert(key, t);
     }
 
@@ -529,6 +540,9 @@ impl Renderer {
 
     /// Release targets of nodes that weren't drawn this frame into the pool.
     pub fn end_frame(&mut self) {
+        if let Some(p) = &mut self.profiler {
+            p.finish(&self.device, &self.queue);
+        }
         let used = std::mem::take(&mut self.used);
         let stale: Vec<u64> = self
             .nodes
@@ -544,6 +558,17 @@ impl Renderer {
         while self.pool.len() > POOL_LIMIT {
             self.pool.remove(0);
         }
+    }
+
+    /// Can this GPU measure time per node?
+    pub fn can_time_nodes(&self) -> bool {
+        self.profiler.is_some()
+    }
+
+    /// Smoothed GPU milliseconds per node key (from a frame or two ago),
+    /// and their sum. Empty if the GPU can't measure it.
+    pub fn node_times(&self) -> Option<(&HashMap<u64, f32>, f32)> {
+        self.profiler.as_ref().map(|p| (p.times(), p.total()))
     }
 
     /// Graph-node targets alive and pooled (for tests and stats).
@@ -579,6 +604,7 @@ impl Renderer {
         signals: &[u8],
         params: &[f32],
         inputs: [Option<&wgpu::TextureView>; 2],
+        timing: Option<u32>,
     ) {
         for i in 0..MAX_BUFFERS {
             if scene.uses_buffer[i] {
@@ -607,7 +633,18 @@ impl Renderer {
         let in_a = inputs[0].unwrap_or(&self.black.view);
         let in_b = inputs[1].unwrap_or(&self.black.view);
 
-        for (pipeline, target) in &scene.passes {
+        let last = scene.passes.len().saturating_sub(1);
+        for (pass_i, (pipeline, target)) in scene.passes.iter().enumerate() {
+            let timestamps = match (timing, &self.profiler) {
+                (Some(slot), Some(p)) if pass_i == 0 || pass_i == last => {
+                    Some(wgpu::RenderPassTimestampWrites {
+                        query_set: &p.set,
+                        beginning_of_pass_write_index: (pass_i == 0).then_some(2 * slot),
+                        end_of_pass_write_index: (pass_i == last).then_some(2 * slot + 1),
+                    })
+                }
+                _ => None,
+            };
             let buf_view = |i: usize| match (latest[i], &t.bufs[i]) {
                 (Some(k), Some(b)) => &b[k].view,
                 _ => &self.black.view,
@@ -663,7 +700,7 @@ impl Renderer {
                         },
                     })],
                     depth_stencil_attachment: None,
-                    timestamp_writes: None,
+                    timestamp_writes: timestamps,
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
